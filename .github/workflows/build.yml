@@ -22,8 +22,13 @@ jobs:
       - name: Install just
         uses: extractions/setup-just@v2
 
-      - name: Install tools
-        run: choco install rsrc upx -y
+      - name: Install rsrc
+        run: go install github.com/akavel/rsrc@latest
+
+      - name: Install UPX
+        uses: crazy-max/ghaction-upx@v3
+        with:
+          install-only: true
 
       - name: Build DEV
         run: just dev
