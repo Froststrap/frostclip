@@ -19,6 +19,9 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Install Go modules
+        run: go mod tidy
+
       - name: Install just
         uses: extractions/setup-just@v2
 
