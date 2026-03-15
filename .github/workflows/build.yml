@@ -1,0 +1,46 @@
+name: Build Frostclip
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install just
+        uses: extractions/setup-just@v2
+
+      - name: Install tools
+        run: choco install rsrc upx -y
+
+      - name: Build DEV
+        run: just dev
+
+      - name: Upload DEV artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frostclip-dev
+          path: frostclip.exe
+          retention-days: 7
+
+      - name: Build RELEASE
+        run: just release
+
+      - name: Upload RELEASE artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frostclip-release
+          path: frostclip.exe
+          retention-days: 30
