@@ -194,12 +194,12 @@ func hwPipelines() []encoderPipeline {
 				return append(args, segmentArgs(segPattern)...)
 			},
 			probeArgs: func() []string {
-				return []string{
-					"-f", "lavfi", "-i", "testsrc=size=1920x1080:rate=1",
-					"-vf", "format=nv12",
-					"-c:v", "h264_nvenc", "-preset", "p1",
-					"-frames:v", "1", "-f", "null", "-",
-				}
+			    return []string{
+			        "-f", "lavfi", "-i", "testsrc=size=1920x1080:rate=1",
+			        "-vf", "format=nv12,hwupload",
+			        "-c:v", "h264_nvenc", "-preset", "p1",
+			        "-frames:v", "1", "-f", "null", "-",
+			    }
 			},
 		},
 		{
