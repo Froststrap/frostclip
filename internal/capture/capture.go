@@ -10,11 +10,12 @@ import (
 	"sync"
 	"time"
 
+	"frostclip/internal/buffer"
+	"frostclip/internal/process"
+
 	"github.com/go-toast/toast"
 	"github.com/yusufpapurcu/wmi"
 	"go.uber.org/zap"
-	"frostclip/internal/buffer"
-	"frostclip/internal/process"
 )
 
 type gpuVendor int
@@ -92,7 +93,7 @@ func vendorName(v gpuVendor) string {
 type Config struct {
 	FFmpegBin      string
 	MicDevice      string
-	SystemLoopback bool   // Im changing this to use Stereo Mix because WASAPI doesn't exist on ffmpeg or something
+	SystemLoopback bool // Im changing this to use Stereo Mix because WASAPI doesn't exist on ffmpeg or something
 	Framerate      int
 	Resolution     string
 	Bitrate        string
@@ -163,25 +164,16 @@ func hwPipelines() []encoderPipeline {
 				if fps == 0 {
 					fps = 60
 				}
-				fc := fmt.Sprintf("ddagrab=framerate=%d", fps)
+				fc := fmt.Sprintf("ddagrab=framerate=%d,hwdownload,format=bgra", fps)
 				if cfg.Resolution != "" {
 					parts := strings.SplitN(cfg.Resolution, "x", 2)
 					if len(parts) == 2 {
-						fc += fmt.Sprintf(",scale_cuda=w=%s:h=%s:format=nv12", parts[0], parts[1])
-					} else {
-						fc += ",scale_cuda=format=nv12"
+						fc += fmt.Sprintf(",scale=w=%s:h=%s:flags=fast_bilinear", parts[0], parts[1])
 					}
-				} else {
-					fc += ",scale_cuda=format=nv12"
 				}
-				fc += ",hwmap=derive_device=cuda[vout]"
+				fc += ",format=yuv420p[vout]"
 
-				args := []string{
-				    "-y",
-				    "-init_hw_device", "d3d11va=d3d",
-				    "-init_hw_device", "cuda=cuda@d3d",
-				    "-filter_hw_device", "d3d",
-				}
+				args := []string{"-y"}
 				inputArgs, audioRefs := audioInputArgs(cfg)
 				args = append(args, inputArgs...)
 				br := bitrate(cfg)
@@ -194,12 +186,12 @@ func hwPipelines() []encoderPipeline {
 				return append(args, segmentArgs(segPattern)...)
 			},
 			probeArgs: func() []string {
-			    return []string{
-			        "-f", "lavfi", "-i", "testsrc=size=1920x1080:rate=1",
-			        "-vf", "format=nv12,hwupload",
-			        "-c:v", "h264_nvenc", "-preset", "p1",
-			        "-frames:v", "1", "-f", "null", "-",
-			    }
+				return []string{
+					"-filter_complex", "ddagrab=framerate=1,hwdownload,format=bgra,format=yuv420p[vout]",
+					"-map", "[vout]",
+					"-vcodec", "h264_nvenc", "-preset", "p1", "-cq", "28",
+					"-frames:v", "1", "-f", "null", "-",
+				}
 			},
 		},
 		{
@@ -382,7 +374,7 @@ func Loop(buf *buffer.CircularBuffer, cfg Config, log *zap.Logger) {
 			zap.Int("consecutive_crashes", consecutiveCrashes),
 		)
 
-	if consecutiveCrashes >= maxFastCrashes {
+		if consecutiveCrashes >= maxFastCrashes {
 			backoff := min(time.Duration(consecutiveCrashes)*5*time.Second, 60*time.Second)
 			log.Warn("encoder crashing repeatedly — backing off",
 				zap.String("encoder", p.encoder),

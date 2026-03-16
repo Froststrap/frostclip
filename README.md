@@ -2,7 +2,7 @@ Game clipper for [Froststrap](https://github.com/Froststrap/Froststrap)
 
 ## CURRENTLY IN ALPHA STAGE
 
-However, it is usable (for AMD and Intel not too sure aobut NVIDIA), if you are on NVIDIA and it doesn't work head over to the [Discord server](https://discord.gg/9nvJVuaqy4)
+However, it is usable for daily use, just without the features I want there to be. If you have any issue report them in our [Discord](https://discord.gg/9nvJVuaqy4).
 
 ### Dependencies
 
