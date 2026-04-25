@@ -1,7 +1,8 @@
 APP_WIN := "frostclip.exe"
-APP_LINUX := "frostclip"
-APP_MAC := "frostclip"
+APP_LINUX := "frostclip-linux"
+APP_MAC := "frostclip-macos"
 
+# Windows builds
 windows-dev:
     go build -o {{ APP_WIN }} .
 
@@ -18,13 +19,13 @@ linux-release:
     GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o {{ APP_LINUX }} .
     upx --best {{ APP_LINUX }}
 
-# macOS builds
+# macOS builds (must run natively on macOS)
 mac-dev:
-    GOOS=darwin GOARCH=amd64 go build -o {{ APP_MAC }} .
+    go build -o {{ APP_MAC }} .
 
 mac-release:
-    GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o {{ APP_MAC }}-amd64 .
-    GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o {{ APP_MAC }}-arm64 .
+    go build -ldflags="-s -w" -o {{ APP_MAC }}-amd64 .
+    GOARCH=arm64 go build -ldflags="-s -w" -o {{ APP_MAC }}-arm64 .
     lipo -create -output {{ APP_MAC }} {{ APP_MAC }}-amd64 {{ APP_MAC }}-arm64
     rm {{ APP_MAC }}-amd64 {{ APP_MAC }}-arm64
 
