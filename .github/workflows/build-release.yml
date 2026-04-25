@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - "v*"
+  pull_request:
 
 jobs:
   release:
@@ -65,6 +66,7 @@ jobs:
           retention-days: 30
 
       - name: Upload to release
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: ${{ matrix.artifact }}
