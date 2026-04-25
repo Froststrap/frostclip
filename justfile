@@ -24,10 +24,10 @@ mac-dev:
     go build -o {{ APP_MAC }} .
 
 mac-release:
-    go build -ldflags="-s -w" -o {{ APP_MAC }}-amd64 .
+    GOARCH=amd64 go build -ldflags="-s -w" -o {{ APP_MAC }}-amd64 .
     GOARCH=arm64 go build -ldflags="-s -w" -o {{ APP_MAC }}-arm64 .
     lipo -create -output {{ APP_MAC }} {{ APP_MAC }}-amd64 {{ APP_MAC }}-arm64
     rm {{ APP_MAC }}-amd64 {{ APP_MAC }}-arm64
 
 clean:
-    rm -f ./frostclip ./frostclip.exe ./frostclip-arm64 ./frostclip.syso
+    rm -f ./frostclip.exe ./frostclip-linux ./frostclip-macos ./frostclip.syso
