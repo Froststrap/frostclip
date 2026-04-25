@@ -1,0 +1,52 @@
+name: Dev Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  dev:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            just-target: windows-dev
+            artifact: frostclip.exe
+            name: frostclip-dev-windows
+          - os: ubuntu-latest
+            just-target: linux-dev
+            artifact: frostclip
+            name: frostclip-dev-linux
+          - os: macos-latest
+            just-target: mac-dev
+            artifact: frostclip
+            name: frostclip-dev-macos
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install just
+        uses: extractions/setup-just@v2
+
+      - name: Install Linux dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get install -y libayatana-appindicator3-dev
+
+      - run: go mod tidy
+
+      - name: Build
+        run: just ${{ matrix.just-target }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ matrix.artifact }}
+          retention-days: 7

@@ -1,0 +1,70 @@
+name: Release Build
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            just-target: windows-release
+            artifact: frostclip.exe
+            name: frostclip-windows
+          - os: ubuntu-latest
+            just-target: linux-release
+            artifact: frostclip
+            name: frostclip-linux
+          - os: macos-latest
+            just-target: mac-release
+            artifact: frostclip
+            name: frostclip-macos-universal
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install just
+        uses: extractions/setup-just@v2
+
+      - name: Install Linux dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get install -y libayatana-appindicator3-dev
+
+      - name: Install rsrc (Windows)
+        if: matrix.os == 'windows-latest'
+        run: go install github.com/akavel/rsrc@latest
+
+      - name: Install UPX (Windows)
+        if: matrix.os == 'windows-latest'
+        uses: crazy-max/ghaction-upx@v3
+        with:
+          install-only: true
+
+      - name: Install UPX (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get install -y upx
+
+      - run: go mod tidy
+
+      - name: Build
+        run: just ${{ matrix.just-target }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ matrix.artifact }}
+          retention-days: 30
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.artifact }}

@@ -1,6 +1,9 @@
 package tray
 
 import (
+	"encoding/binary"
+	"runtime"
+
 	"frostclip/internal/hotkey"
 
 	"fyne.io/systray"
@@ -16,7 +19,7 @@ func Quit() {
 }
 
 func onReady(log *zap.Logger, iconData []byte) {
-	systray.SetIcon(iconData)
+	systray.SetIcon(trayIcon(iconData))
 	systray.SetTitle("FrostClip")
 	systray.SetTooltip("FrostClip — Clip Recorder")
 
@@ -53,3 +56,41 @@ func onReady(log *zap.Logger, iconData []byte) {
 }
 
 func onExit() {}
+
+func trayIcon(data []byte) []byte {
+	if runtime.GOOS == "windows" {
+		return data
+	}
+	if png := extractPNGFromICO(data); png != nil {
+		return png
+	}
+	return data // already PNG, or extraction failed — pass through as-is
+}
+
+func extractPNGFromICO(data []byte) []byte {
+	const pngMagic = "\x89PNG"
+
+	if len(data) < 6 {
+		return nil
+	}
+	if binary.LittleEndian.Uint16(data[2:]) != 1 { // type must be 1 (ICO)
+		return nil
+	}
+	count := int(binary.LittleEndian.Uint16(data[4:]))
+
+	for i := 0; i < count; i++ {
+		entryOff := 6 + i*16
+		if entryOff+16 > len(data) {
+			break
+		}
+		imgSize := int(binary.LittleEndian.Uint32(data[entryOff+8:]))
+		imgOff := int(binary.LittleEndian.Uint32(data[entryOff+12:]))
+		if imgOff+imgSize > len(data) || imgSize < 4 {
+			continue
+		}
+		if string(data[imgOff:imgOff+4]) == pngMagic {
+			return data[imgOff : imgOff+imgSize]
+		}
+	}
+	return nil
+}
