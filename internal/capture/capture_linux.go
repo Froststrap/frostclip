@@ -131,7 +131,7 @@ func hwVideoArgs(cfg Config, segPattern string, v gpuVendor, inputW, inputH uint
 	case vendorAMD, vendorIntel:
 		renderNode := detectRenderNode()
 		scale := buildScaleVaapiFilter(cfg.Resolution)
-		fc := fmt.Sprintf("[0:v]format=nv12%s,hwupload=extra_hw_frames=64[vout]", scale)
+		fc := fmt.Sprintf("[0:v]format=nv12,hwupload=extra_hw_frames=64%s[vout]", scale)
 		args = append(args,
 			"-init_hw_device", fmt.Sprintf("vaapi=va:%s", renderNode),
 			"-filter_hw_device", "va",
@@ -206,7 +206,7 @@ func x11GrabArgs(cfg Config, segPattern string, v gpuVendor) []string {
 	case vendorAMD, vendorIntel:
 		renderNode := detectRenderNode()
 		scale := buildScaleVaapiFilter(cfg.Resolution)
-		fc := fmt.Sprintf("[0:v]format=nv12%s,hwupload=extra_hw_frames=64[vout]", scale)
+		fc := fmt.Sprintf("[0:v]format=nv12,hwupload=extra_hw_frames=64%s[vout]", scale)
 		args = append(args,
 			"-init_hw_device", fmt.Sprintf("vaapi=va:%s", renderNode),
 			"-filter_hw_device", "va",
@@ -313,7 +313,7 @@ func x11Loop(buf *buffer.CircularBuffer, cfg Config, log *zap.Logger) {
 		args := x11GrabArgs(cfg, segPattern, vendor)
 		cmd := exec.Command(cfg.FFmpegBin, args...)
 		cmd.Stderr = os.Stderr
-		
+
 		log.Debug("x11grab: ffmpeg command", zap.String("cmd", fmt.Sprintf("%s %s", cfg.FFmpegBin, strings.Join(args, " "))))
 		if err := cmd.Start(); err != nil {
 			log.Warn("x11grab: start failed", zap.Error(err))
