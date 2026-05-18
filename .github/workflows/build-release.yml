@@ -15,12 +15,12 @@ jobs:
             name: frostclip-windows
           - os: ubuntu-latest
             just-target: linux-release
-            artifact: frostclip
+            artifact: frostclip-linux
             name: frostclip-linux
           - os: macos-latest
             just-target: mac-release
-            artifact: frostclip
-            name: frostclip-macos-universal
+            artifact: frostclip-macos-*
+            name: frostclip-macos
 
     runs-on: ${{ matrix.os }}
 
@@ -36,7 +36,7 @@ jobs:
 
       - name: Install Linux dependencies
         if: matrix.os == 'ubuntu-latest'
-        run: sudo apt-get install -y libayatana-appindicator3-dev
+        run: sudo apt-get install -y libayatana-appindicator3-dev upx
 
       - name: Install rsrc (Windows)
         if: matrix.os == 'windows-latest'
@@ -47,10 +47,6 @@ jobs:
         uses: crazy-max/ghaction-upx@v3
         with:
           install-only: true
-
-      - name: Install UPX (Linux)
-        if: matrix.os == 'ubuntu-latest'
-        run: sudo apt-get install -y upx
 
       - run: go mod tidy
 

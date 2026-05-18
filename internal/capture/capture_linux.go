@@ -307,11 +307,14 @@ func Loop(buf *buffer.CircularBuffer, cfg Config, log *zap.Logger) {
 
 func x11Loop(buf *buffer.CircularBuffer, cfg Config, log *zap.Logger) {
 	vendor := detectGPUVendor()
+	log.Info("x11grab detected GPU vendor", zap.Int("vendor", int(vendor)))
 	for {
 		segPattern := filepath.Join(buf.TempDir(), "seg%06d.ts")
-		cmd := exec.Command(cfg.FFmpegBin, x11GrabArgs(cfg, segPattern, vendor)...)
+		args := x11GrabArgs(cfg, segPattern, vendor)
+		cmd := exec.Command(cfg.FFmpegBin, args...)
 		cmd.Stderr = os.Stderr
-
+		
+		log.Debug("x11grab: ffmpeg command", zap.String("cmd", fmt.Sprintf("%s %s", cfg.FFmpegBin, strings.Join(args, " "))))
 		if err := cmd.Start(); err != nil {
 			log.Warn("x11grab: start failed", zap.Error(err))
 			time.Sleep(time.Second)
@@ -333,6 +336,7 @@ func x11Loop(buf *buffer.CircularBuffer, cfg Config, log *zap.Logger) {
 
 func waylandLoop(buf *buffer.CircularBuffer, cfg Config, log *zap.Logger) {
 	vendor := detectGPUVendor()
+	log.Info("wayland detected GPU vendor", zap.Int("vendor", int(vendor)))
 	for {
 		err := runWaylandCapture(buf, cfg, vendor, log)
 		if err != nil {
@@ -559,7 +563,9 @@ func runWaylandCapture(buf *buffer.CircularBuffer, cfg Config, vendor gpuVendor,
 	if waylandCfg.Framerate <= 0 || waylandCfg.Framerate > 10 {
 		waylandCfg.Framerate = 10
 	}
-	ffCmd := exec.Command(cfg.FFmpegBin, hwVideoArgs(waylandCfg, segPattern, vendor, width, height, inputPixFmt)...)
+	ffArgs := hwVideoArgs(waylandCfg, segPattern, vendor, width, height, inputPixFmt)
+	log.Debug("wayland: ffmpeg command", zap.String("cmd", fmt.Sprintf("%s %s", cfg.FFmpegBin, strings.Join(ffArgs, " "))))
+	ffCmd := exec.Command(cfg.FFmpegBin, ffArgs...)
 	ffCmd.Stderr = os.Stderr
 	stdin, err := ffCmd.StdinPipe()
 	if err != nil {
@@ -610,6 +616,7 @@ func runWaylandCapture(buf *buffer.CircularBuffer, cfg Config, vendor gpuVendor,
 			wlBuf.Destroy()
 			return fmt.Errorf("damage frame buffer: %w", err)
 		}
+		log.Debug("wayland: capturing frame", zap.Int("offset", offset), zap.Int("frameSize", frameSize))
 		if err := frame.Capture(); err != nil {
 			frame.Destroy()
 			wlBuf.Destroy()
@@ -626,11 +633,14 @@ func runWaylandCapture(buf *buffer.CircularBuffer, cfg Config, vendor gpuVendor,
 		frame.Destroy()
 		wlBuf.Destroy()
 
+		log.Debug("wayland: frame captured successfully")
+
 		if frameErr != nil {
 			return frameErr
 		}
 
 		frameSlice := shmData[offset : offset+frameSize]
+		log.Debug("wayland: writing frame to ffmpeg", zap.Int("frameSize", frameSize))
 		if err := writeAll(stdin, frameSlice); err != nil {
 			return fmt.Errorf("write to ffmpeg: %w", err)
 		}
