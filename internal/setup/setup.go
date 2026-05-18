@@ -42,7 +42,6 @@ func EnsureFFmpeg(log *zap.Logger) (string, error) {
 	return path, checkFFmpegVersion(path, log)
 }
 
-func EnsureFFmpeg(log *zap.Logger) (string, error) {
 func ResolveAudio(ffmpegBin string, mode settings.AudioMode, log *zap.Logger) AudioConfig {
 	log.Info("resolving audio", zap.String("mode", string(mode)))
 	switch mode {
