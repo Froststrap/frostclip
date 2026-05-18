@@ -1,7 +1,9 @@
 package buffer
 
 import (
+	"fmt"
 	"os"
+	"runtime"
 	"sync"
 	"time"
 )
@@ -21,15 +23,51 @@ type CircularBuffer struct {
 }
 
 func New(maxSlots int) *CircularBuffer {
-	tmpDir, err := os.MkdirTemp("", "frostclip-*")
+	b, err := NewWithBaseDir(maxSlots, "")
 	if err != nil {
 		panic("failed to create temp dir: " + err.Error())
+	}
+	return b
+}
+
+func NewWithBaseDir(maxSlots int, baseDir string) (*CircularBuffer, error) {
+	tmpDir, err := createTempDir(baseDir)
+	if err != nil {
+		return nil, err
 	}
 	return &CircularBuffer{
 		segments: make([]segment, maxSlots),
 		maxSize:  maxSlots,
 		tempDir:  tmpDir,
+	}, nil
+}
+
+func createTempDir(baseDir string) (string, error) {
+	if baseDir != "" {
+		if err := os.MkdirAll(baseDir, 0o755); err != nil {
+			return "", fmt.Errorf("create segment temp dir %q: %w", baseDir, err)
+		}
+		dir, err := os.MkdirTemp(baseDir, "frostclip-*")
+		if err != nil {
+			return "", fmt.Errorf("create temp segment dir in %q: %w", baseDir, err)
+		}
+		return dir, nil
 	}
+
+	if runtime.GOOS == "linux" {
+		const shmDir = "/dev/shm"
+		if info, err := os.Stat(shmDir); err == nil && info.IsDir() {
+			if dir, err := os.MkdirTemp(shmDir, "frostclip-*"); err == nil {
+				return dir, nil
+			}
+		}
+	}
+
+	dir, err := os.MkdirTemp("", "frostclip-*")
+	if err != nil {
+		return "", fmt.Errorf("create temp segment dir: %w", err)
+	}
+	return dir, nil
 }
 
 func (b *CircularBuffer) Push(path string) {

@@ -44,20 +44,22 @@ const (
 )
 
 type Settings struct {
-	FPSRaw     any    `json:"fps"`
-	Resolution string `json:"resolution"`
-	Bitrate    string `json:"bitrate"`
-	Audio      string `json:"audio"`
+	FPSRaw         any    `json:"fps"`
+	Resolution     string `json:"resolution"`
+	Bitrate        string `json:"bitrate"`
+	Audio          string `json:"audio"`
+	SegmentTempDir string `json:"segment_temp_dir"`
 
 	FPS       int       `json:"-"`
 	AudioMode AudioMode `json:"-"`
 }
 
 var defaults = Settings{
-	FPSRaw:     "refresh_rate",
-	Resolution: "full_screen",
-	Bitrate:    "auto",
-	Audio:      "microphone",
+	FPSRaw:         "refresh_rate",
+	Resolution:     "full_screen",
+	Bitrate:        "auto",
+	Audio:          "microphone",
+	SegmentTempDir: "",
 }
 
 func Load(log *zap.Logger) (*Settings, error) {
@@ -119,17 +121,19 @@ func Load(log *zap.Logger) (*Settings, error) {
 	default:
 		s.AudioMode = AudioMicrophone
 	}
+	s.SegmentTempDir = strings.TrimSpace(s.SegmentTempDir)
 	log.Info("loaded settings",
 		zap.Int("fps", s.FPS),
 		zap.String("resolution", s.Resolution),
 		zap.String("bitrate", s.Bitrate),
 		zap.String("audio", string(s.AudioMode)),
+		zap.String("segment_temp_dir", s.SegmentTempDir),
 	)
 	return &s, nil
 }
 
 func writeDefaults(path string) error {
-	content := "{\n  \"fps\": \"refresh_rate\",\n  \"resolution\": \"full_screen\",\n  \"bitrate\": \"auto\",\n  \"audio\": \"microphone\"\n}\n"
+	content := "{\n  \"fps\": \"refresh_rate\",\n  \"resolution\": \"full_screen\",\n  \"bitrate\": \"auto\",\n  \"audio\": \"microphone\",\n  \"segment_temp_dir\": \"\"\n}\n"
 	return os.WriteFile(path, []byte(content), 0644)
 }
 

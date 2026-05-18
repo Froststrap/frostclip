@@ -204,7 +204,11 @@ func main() {
 	log.Info("FrostClip is running!")
 	log.Info("hotkeys: F6=10s  F7=15s  F8=30s  F9=60s  Ctrl+C=quit")
 
-	buf := buffer.New(120)
+	buf, err := buffer.NewWithBaseDir(120, cfg.SegmentTempDir)
+	if err != nil {
+		log.Fatal("could not create segment buffer", zap.Error(err))
+	}
+	log.Info("segment storage initialized", zap.String("temp_dir", buf.TempDir()))
 	saveChan := make(chan hotkey.SaveRequest, 10)
 
 	capCfg := capture.Config{
