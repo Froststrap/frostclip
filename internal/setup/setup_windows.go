@@ -4,14 +4,12 @@ package setup
 
 import (
 	"fmt"
-	"io"
-	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 
 	"frostclip/internal/notify"
-	"frostclip/internal/process"
 
 	"go.uber.org/zap"
 )
@@ -21,31 +19,56 @@ func findFFmpeg() (string, error) {
 }
 
 func installFFmpeg(log *zap.Logger) (string, error) {
-	log.Info("installing FFmpeg via winget...")
-	var errBuf strings.Builder
-	cmd := process.Command("winget", "install",
-		"FFmpeg (Essentials Build)",
-		"--accept-package-agreements",
-		"--accept-source-agreements",
-	)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = io.MultiWriter(os.Stderr, &errBuf)
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("winget install failed: %w\n%s", err, errBuf.String())
+	baseDir, err := appDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve app dir: %w", err)
 	}
-	out, err := process.Command("where.exe", "ffmpeg").Output()
-	if err == nil {
-		path := strings.TrimSpace(strings.Split(string(out), "\n")[0])
-		if path != "" {
-			log.Info("FFmpeg ready", zap.String("path", path))
-			return path, nil
+	installDir := filepath.Join(baseDir, "ffmpeg")
+	if err := ensureDir(installDir); err != nil {
+		return "", fmt.Errorf("create ffmpeg dir: %w", err)
+	}
+
+	log.Info("installing FFmpeg from gyan.dev", zap.String("dir", installDir))
+	urls := []string{
+		"https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip",
+		"https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-full.zip",
+	}
+	var lastErr error
+	for _, u := range urls {
+		data, err := downloadBytes(u)
+		if err != nil {
+			lastErr = err
+			continue
 		}
+		ffmpegData, _, err := unzipFind(data, func(name string) bool {
+			return strings.HasSuffix(name, "/bin/ffmpeg.exe")
+		})
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if err := writeExecutable(filepath.Join(installDir, "ffmpeg.exe"), ffmpegData); err != nil {
+			return "", err
+		}
+		if ffprobeData, _, err := unzipFind(data, func(name string) bool {
+			return strings.HasSuffix(name, "/bin/ffprobe.exe")
+		}); err == nil {
+			_ = writeExecutable(filepath.Join(installDir, "ffprobe.exe"), ffprobeData)
+		}
+		if ffplayData, _, err := unzipFind(data, func(name string) bool {
+			return strings.HasSuffix(name, "/bin/ffplay.exe")
+		}); err == nil {
+			_ = writeExecutable(filepath.Join(installDir, "ffplay.exe"), ffplayData)
+		}
+		path := filepath.Join(installDir, "ffmpeg.exe")
+		log.Info("FFmpeg ready", zap.String("path", path))
+		return path, nil
 	}
-	return "", fmt.Errorf("ffmpeg installed but not found — restart FrostClip")
+	return "", fmt.Errorf("could not install ffmpeg from gyan.dev: %w", lastErr)
 }
 
 func installHint() string {
-	return `run: winget install "FFmpeg (Essentials Build)"`
+	return `download gyan.dev FFmpeg build and place ffmpeg.exe in ./ffmpeg`
 }
 
 func detectMicDevice(ffmpegBin string, log *zap.Logger) string {

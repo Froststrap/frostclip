@@ -61,7 +61,15 @@ func saveClip(buf *buffer.CircularBuffer, seconds int, cfg Config, log *zap.Logg
 
 	cmd := process.Command(cfg.FFmpegBin,
 		"-y", "-f", "concat", "-safe", "0", "-i", tmpFile.Name(),
-		"-c", "copy", outputPath,
+		"-map", "0:v:0", "-map", "0:a?",
+		"-c:v", "libx264",
+		"-preset", "veryfast",
+		"-crf", "20",
+		"-pix_fmt", "yuv420p",
+		"-bf", "0",
+		"-movflags", "+faststart",
+		"-c:a", "aac", "-b:a", "128k",
+		outputPath,
 	)
 
 	if out, err := cmd.CombinedOutput(); err != nil {

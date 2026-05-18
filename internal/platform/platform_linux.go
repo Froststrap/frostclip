@@ -13,8 +13,6 @@ import (
 	"frostclip/internal/process"
 )
 
-// ScreenResolution returns the primary monitor's resolution.
-// Tries wlr-randr (Wayland/wlroots) then xrandr (X11/XWayland).
 func ScreenResolution() (w, h int, err error) {
 	if res, e := resolutionFromWlrRandr(); e == nil {
 		return res[0], res[1], nil
@@ -22,7 +20,6 @@ func ScreenResolution() (w, h int, err error) {
 	return resolutionFromXrandr()
 }
 
-// RefreshRate returns the primary monitor's refresh rate in Hz.
 func RefreshRate() (int, error) {
 	if hz, e := refreshFromWlrRandr(); e == nil {
 		return hz, nil
@@ -30,16 +27,12 @@ func RefreshRate() (int, error) {
 	return refreshFromXrandr()
 }
 
-// ClipsDir returns the default directory for saving clips, honouring XDG.
 func ClipsDir() string {
-	// Respect XDG_VIDEOS_DIR if set
 	if xdg := xdgVideosDir(); xdg != "" {
 		return filepath.Join(xdg, "FrostClips")
 	}
 	return filepath.Join(os.Getenv("HOME"), "Videos", "FrostClips")
 }
-
-// --- wlr-randr (Wayland / wlroots compositors: sway, Hyprland, river) ------
 
 var wlrResRe = regexp.MustCompile(`(\d+)x(\d+)\s+px`)
 var wlrHzRe = regexp.MustCompile(`([\d.]+)\s+Hz\s+\(preferred\)`)
@@ -77,9 +70,6 @@ func refreshFromWlrRandr() (int, error) {
 	return int(f + 0.5), nil
 }
 
-// --- xrandr (X11 / XWayland) -----------------------------------------------
-
-// xrandr output line with resolution: "   1920x1080      60.00*+"
 var xrandrResRe = regexp.MustCompile(`\s+(\d+)x(\d+)\s+`)
 var xrandrHzRe = regexp.MustCompile(`(\d+\.\d+)\*`)
 
@@ -88,11 +78,9 @@ func resolutionFromXrandr() (int, int, error) {
 	if err != nil {
 		return 0, 0, fmt.Errorf("xrandr: %w", err)
 	}
-	// Find the first "connected primary" or first "connected" block
 	lines := strings.Split(string(out), "\n")
 	for _, line := range lines {
 		if strings.Contains(line, " connected") {
-			// The resolution follows on subsequent lines; keep scanning
 			continue
 		}
 		m := xrandrResRe.FindStringSubmatch(line)
@@ -123,10 +111,7 @@ func refreshFromXrandr() (int, error) {
 	return int(f + 0.5), nil
 }
 
-// --- XDG helpers -----------------------------------------------------------
-
 func xdgVideosDir() string {
-	// Try parsing ~/.config/user-dirs.dirs
 	path := filepath.Join(os.Getenv("HOME"), ".config", "user-dirs.dirs")
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -138,7 +123,6 @@ func xdgVideosDir() string {
 		return ""
 	}
 	dir := string(m[1])
-	// Replace $HOME
 	dir = strings.ReplaceAll(dir, "$HOME", os.Getenv("HOME"))
 	return dir
 }

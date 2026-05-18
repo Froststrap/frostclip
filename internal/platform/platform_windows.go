@@ -11,7 +11,6 @@ import (
 	"frostclip/internal/process"
 )
 
-// ScreenResolution returns the primary monitor's resolution in pixels.
 func ScreenResolution() (w, h int, err error) {
 	cmd := process.Command("powershell", "-NoProfile", "-Command",
 		`$s = Get-CimInstance -ClassName Win32_VideoController | Select-Object -First 1; "$($s.CurrentHorizontalResolution)x$($s.CurrentVerticalResolution)"`,
@@ -30,7 +29,6 @@ func ScreenResolution() (w, h int, err error) {
 	return w, h, nil
 }
 
-// RefreshRate returns the primary monitor's refresh rate in Hz.
 func RefreshRate() (int, error) {
 	cmd := process.Command("powershell", "-NoProfile", "-Command",
 		`(Get-CimInstance -ClassName Win32_VideoController | Select-Object -First 1).CurrentRefreshRate`,
@@ -49,7 +47,6 @@ func RefreshRate() (int, error) {
 	return hz, nil
 }
 
-// ClipsDir returns the default directory for saving clips.
 func ClipsDir() string {
 	return filepath.Join(os.Getenv("USERPROFILE"), "Videos", "FrostClips")
 }

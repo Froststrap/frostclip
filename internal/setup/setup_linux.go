@@ -3,6 +3,8 @@
 package setup
 
 import (
+	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 
@@ -13,20 +15,64 @@ func findFFmpeg() (string, error) {
 	return exec.LookPath("ffmpeg")
 }
 
-// installFFmpeg on Linux we can't auto-install; just return a friendly error.
 func installFFmpeg(log *zap.Logger) (string, error) {
-	hint := installHint()
-	log.Error("FFmpeg not found", zap.String("install", hint))
-	return "", nil // non-fatal: log shows the hint, user installs manually
+	type pm struct {
+		bin  string
+		args []string
+		hint string
+	}
+	var selected *pm
+	for _, candidate := range []pm{
+		{bin: "apt-get", args: []string{"apt-get", "install", "-y", "ffmpeg"}, hint: "sudo apt-get install -y ffmpeg"},
+		{bin: "dnf", args: []string{"dnf", "install", "-y", "ffmpeg"}, hint: "sudo dnf install -y ffmpeg"},
+		{bin: "pacman", args: []string{"pacman", "-S", "--noconfirm", "ffmpeg"}, hint: "sudo pacman -S --noconfirm ffmpeg"},
+		{bin: "zypper", args: []string{"zypper", "--non-interactive", "install", "ffmpeg"}, hint: "sudo zypper --non-interactive install ffmpeg"},
+	} {
+		if _, err := exec.LookPath(candidate.bin); err == nil {
+			c := candidate
+			selected = &c
+			break
+		}
+	}
+	if selected == nil {
+		return "", fmt.Errorf("ffmpeg not found and no supported package manager detected")
+	}
+
+	run := func(bin string, args ...string) error {
+		out, err := runCommand(bin, args...)
+		if err != nil {
+			log.Warn("install command failed",
+				zap.String("cmd", strings.Join(append([]string{bin}, args...), " ")),
+				zap.String("out", strings.TrimSpace(out)),
+				zap.Error(err))
+		}
+		return err
+	}
+
+	log.Info("installing FFmpeg via package manager", zap.String("cmd", selected.hint))
+	if os.Geteuid() == 0 {
+		_ = run(selected.args[0], selected.args[1:]...)
+	} else if _, err := exec.LookPath("sudo"); err == nil {
+		if run("sudo", append([]string{"-n"}, selected.args...)...) != nil {
+			_ = run("sudo", selected.args...)
+		}
+	} else {
+		_ = run(selected.args[0], selected.args[1:]...)
+	}
+
+	if path, err := findFFmpeg(); err == nil {
+		log.Info("FFmpeg ready", zap.String("path", path))
+		return path, nil
+	}
+	return "", fmt.Errorf("ffmpeg install failed — try manually: %s", selected.hint)
 }
 
 func installHint() string {
-	// Detect package manager and give the right command
 	for _, pm := range []struct{ bin, cmd string }{
 		{"apt-get", "sudo apt-get install -y ffmpeg"},
 		{"dnf", "sudo dnf install -y ffmpeg"},
-		{"pacman", "sudo pacman -S ffmpeg"},
-		{"zypper", "sudo zypper install ffmpeg"},
+		{"pacman", "sudo pacman -S --noconfirm ffmpeg"},
+		{"zypper", "sudo zypper --non-interactive install ffmpeg"},
 	} {
 		if _, err := exec.LookPath(pm.bin); err == nil {
 			return pm.cmd
@@ -35,11 +81,9 @@ func installHint() string {
 	return "install ffmpeg via your package manager"
 }
 
-// detectMicDevice finds a PulseAudio/PipeWire source for microphone input.
 func detectMicDevice(ffmpegBin string, log *zap.Logger) string {
 	log.Info("detecting audio devices (PulseAudio/PipeWire)")
 
-	// pactl list sources short  →  index name driver state
 	out, err := runCommand("pactl", "list", "sources", "short")
 	if err != nil {
 		log.Warn("pactl not available — mic disabled", zap.Error(err))
@@ -53,7 +97,6 @@ func detectMicDevice(ffmpegBin string, log *zap.Logger) string {
 			continue
 		}
 		name := fields[1]
-		// Skip monitor sources (loopback — those are for SystemLoopback)
 		if strings.Contains(name, ".monitor") {
 			continue
 		}

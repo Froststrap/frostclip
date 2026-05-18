@@ -1,4 +1,3 @@
-// Package setup handles FFmpeg discovery and audio device resolution.
 package setup
 
 import (
@@ -14,27 +13,36 @@ import (
 	"go.uber.org/zap"
 )
 
-const minFFmpegMajor = 6 // Lowered from 8: v6+ has x11grab + VAAPI; v7+ has pipewire
+const minFFmpegMajor = 6 // Honestly don't know the minimum needed just to be safe
 
-// AudioConfig holds the resolved audio inputs for the capture pipeline.
 type AudioConfig struct {
 	MicDevice      string
 	SystemLoopback bool
 }
 
-// EnsureFFmpeg verifies FFmpeg is on PATH (and meets the minimum version),
-// or attempts to install it via the platform installer.
 func EnsureFFmpeg(log *zap.Logger) (string, error) {
+	if path, ok := bundledFFmpegPath(); ok {
+		log.Info("FFmpeg found in app folder", zap.String("path", path))
+		return path, checkFFmpegVersion(path, log)
+	}
+
 	path, err := findFFmpeg()
 	if err == nil {
 		log.Info("FFmpeg found on PATH", zap.String("path", path))
 		return path, checkFFmpegVersion(path, log)
 	}
 	log.Info("FFmpeg not found — attempting installation")
-	return installFFmpeg(log)
+	path, err = installFFmpeg(log)
+	if err != nil {
+		return "", err
+	}
+	if path == "" {
+		return "", nil
+	}
+	return path, checkFFmpegVersion(path, log)
 }
 
-// ResolveAudio returns the audio device config for the requested mode.
+func EnsureFFmpeg(log *zap.Logger) (string, error) {
 func ResolveAudio(ffmpegBin string, mode settings.AudioMode, log *zap.Logger) AudioConfig {
 	log.Info("resolving audio", zap.String("mode", string(mode)))
 	switch mode {
@@ -57,10 +65,6 @@ func ResolveAudio(ffmpegBin string, mode settings.AudioMode, log *zap.Logger) Au
 		return AudioConfig{MicDevice: mic}
 	}
 }
-
-// -----------------------------------------------------------------------
-// Internal
-// -----------------------------------------------------------------------
 
 func checkFFmpegVersion(ffmpegBin string, log *zap.Logger) error {
 	out, err := process.Command(ffmpegBin, "-version").Output()

@@ -1,10 +1,11 @@
 frostclip.exe
-frostclip
+frostclip-linux
+frostclip-mac
 frostclip.syso
 
 go.sum
 
 settings.json
 
-
+ffmpeg/
 logs/

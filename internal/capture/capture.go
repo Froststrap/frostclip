@@ -1,18 +1,10 @@
-// Package capture manages the recording loop.
 package capture
 
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
-
-	"time"
-
-	"frostclip/internal/buffer"
-
-	"go.uber.org/zap"
 )
 
 type Config struct {
@@ -74,7 +66,7 @@ func bitrate(cfg Config) string {
 }
 
 func audioArgs(cfg Config) (inputArgs []string, audioRefs []string) {
-	ref := 1 // video occupies input 0
+	ref := 1
 	if cfg.SystemLoopback {
 		inputArgs = append(inputArgs, loopbackInputArgs()...)
 		audioRefs = append(audioRefs, fmt.Sprintf("%d:a", ref))
@@ -102,34 +94,13 @@ func audioMixFragment(audioRefs []string) (fragment, label string) {
 		return ";" + sb.String(), "[aout]"
 	}
 }
-func Loop(buf *buffer.CircularBuffer, cfg Config, log *zap.Logger) {
-	log.Info("capture loop starting")
-	seq := 0
-	for {
-		segPath := filepath.Join(buf.TempDir(), fmt.Sprintf("seg%06d.ts", seq))
-		seq++
 
-		cmd := BuildCaptureCommand(cfg, segPath)
-		if err := cmd.Start(); err != nil {
-			log.Warn("capture: start failed", zap.Error(err))
-			time.Sleep(time.Second)
-			continue
-		}
-		setActiveCmd(cmd.Process)
-
-		err := cmd.Wait()
-		clearActiveCmd()
-
-		if err != nil && !strings.Contains(err.Error(), "124") {
-			log.Debug("recorder exited", zap.Error(err))
-		}
-
-		for i := 0; i < 5; i++ {
-			if info, err := os.Stat(segPath); err == nil && info.Size() > 0 {
-				buf.Push(segPath)
-				break
-			}
-			time.Sleep(60 * time.Millisecond)
-		}
+func segmentArgs(segPattern string) []string {
+	return []string{
+		"-f", "segment",
+		"-segment_time", fmt.Sprintf("%d", segmentSeconds),
+		"-segment_format", "mpegts",
+		"-reset_timestamps", "1",
+		segPattern,
 	}
 }
