@@ -24,10 +24,10 @@ mac-dev:
     go build -o {{ APP_MAC }} .
 
 mac-release-arm64:
-    go build -ldflags="-s -w" -o {{ APP_MAC }}-macos-arm64 .
+    go build -ldflags="-s -w" -o {{ APP_MAC }}-arm64 .
 
 mac-release-amd64:
-    GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o {{ APP_MAC }}-macos-amd64 .
+    CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 CGO_CFLAGS="-arch x86_64" CGO_LDFLAGS="-arch x86_64" go build -ldflags="-s -w" -o {{ APP_MAC }}-amd64 .
 
 mac-release:
     just mac-release-arm64

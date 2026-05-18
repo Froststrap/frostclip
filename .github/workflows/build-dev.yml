@@ -11,15 +11,15 @@ jobs:
         include:
           - os: windows-latest
             just-target: windows-dev
-            artifact: frostclip.exe
+            artifacts: frostclip.exe
             name: frostclip-dev-windows
           - os: ubuntu-latest
             just-target: linux-dev
-            artifact: frostclip
+            artifacts: frostclip-linux
             name: frostclip-dev-linux
           - os: macos-latest
             just-target: mac-dev
-            artifact: frostclip
+            artifacts: frostclip-macos
             name: frostclip-dev-macos
 
     runs-on: ${{ matrix.os }}
@@ -27,24 +27,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-go@v5
+      - name: Install Go
+        uses: actions/setup-go@v4
         with:
-          go-version-file: go.mod
+          go-version: "1.21"
 
-      - name: Install just
-        uses: extractions/setup-just@v2
-
-      - name: Install Linux dependencies
-        if: matrix.os == 'ubuntu-latest'
-        run: sudo apt-get install -y libayatana-appindicator3-dev
-
-      - run: go mod tidy
+      - name: Install Just
+        uses: extractions/setup-just@v1
 
       - name: Build
         run: just ${{ matrix.just-target }}
 
-      - uses: actions/upload-artifact@v4
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v3
         with:
           name: ${{ matrix.name }}
-          path: ${{ matrix.artifact }}
+          path: ${{ matrix.artifacts }}
           retention-days: 7

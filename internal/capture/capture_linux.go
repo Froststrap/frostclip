@@ -131,9 +131,10 @@ func hwVideoArgs(cfg Config, segPattern string, v gpuVendor, inputW, inputH uint
 	case vendorAMD, vendorIntel:
 		renderNode := detectRenderNode()
 		scale := buildScaleVaapiFilter(cfg.Resolution)
-		fc := fmt.Sprintf("[0:v]format=nv12,hwupload=extra_hw_frames=64%s[vout]", scale)
+		fc := fmt.Sprintf("[0:v]format=nv12%s,hwupload=extra_hw_frames=64[vout]", scale)
 		args = append(args,
-			"-vaapi_device", renderNode,
+			"-init_hw_device", fmt.Sprintf("vaapi=va:%s", renderNode),
+			"-filter_hw_device", "va",
 			"-filter_complex", fc+audioFrag,
 			"-map", "[vout]",
 		)
@@ -205,9 +206,10 @@ func x11GrabArgs(cfg Config, segPattern string, v gpuVendor) []string {
 	case vendorAMD, vendorIntel:
 		renderNode := detectRenderNode()
 		scale := buildScaleVaapiFilter(cfg.Resolution)
-		fc := fmt.Sprintf("[0:v]format=nv12,hwupload=extra_hw_frames=64%s[vout]", scale)
+		fc := fmt.Sprintf("[0:v]format=nv12%s,hwupload=extra_hw_frames=64[vout]", scale)
 		args = append(args,
-			"-vaapi_device", renderNode,
+			"-init_hw_device", fmt.Sprintf("vaapi=va:%s", renderNode),
+			"-filter_hw_device", "va",
 			"-filter_complex", fc+audioFrag,
 			"-map", "[vout]",
 		)
