@@ -31,7 +31,7 @@ func installFFmpeg(log *zap.Logger) (string, error) {
 	log.Info("installing FFmpeg from gyan.dev", zap.String("dir", installDir))
 	urls := []string{
 		"https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip",
-		"https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-full.zip",
+		"https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-full.7z",
 	}
 	var lastErr error
 	for _, u := range urls {

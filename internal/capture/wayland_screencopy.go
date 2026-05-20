@@ -54,6 +54,10 @@ func (p *WlrScreencopyFrameV1) Copy(buffer *wl.Buffer) error {
 	return p.Context().SendRequest(p, 0, buffer)
 }
 
+func (p *WlrScreencopyFrameV1) CopyWithDamage(buffer *wl.Buffer) error {
+	return p.Context().SendRequest(p, 2, buffer)
+}
+
 func (p *WlrScreencopyFrameV1) Destroy() error {
 	return p.Context().SendRequest(p, 1)
 }

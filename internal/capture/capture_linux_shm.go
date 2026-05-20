@@ -6,40 +6,19 @@ import (
 	"fmt"
 	"os"
 	"syscall"
-	"unsafe"
 )
 
-func memfdCreate(name string, flags uint) (uintptr, uintptr, syscall.Errno) {
-	nameBytes, err := syscall.BytePtrFromString(name)
-	if err != nil {
-		return 0, 0, syscall.EINVAL
-	}
-	r0, r1, errno := syscall.Syscall(
-		319,
-		uintptr(unsafe.Pointer(nameBytes)),
-		uintptr(flags),
-		0,
-	)
-	return r0, r1, errno
-}
-
 func allocShm(size int) (int, []byte, func(), error) {
-	fd, _, errno := memfdCreate("frostclip-frame", 0)
-	var f *os.File
-	if errno == 0 {
-		f = os.NewFile(fd, "memfd:frostclip-frame")
-	} else {
-		// Fallback: anonymous file in /dev/shm
-		var err error
-		f, err = os.CreateTemp("/dev/shm", "frostclip-frame-*")
+	// Use anonymous file-backed shm for compositor compatibility.
+	// Some wlroots compositors are stricter with memfd buffers.
+	f, err := os.CreateTemp("/dev/shm", "frostclip-frame-*")
+	if err != nil {
+		f, err = os.CreateTemp("", "frostclip-frame-*")
 		if err != nil {
-			f, err = os.CreateTemp("", "frostclip-frame-*")
-			if err != nil {
-				return -1, nil, nil, fmt.Errorf("create shm tmpfile: %w", err)
-			}
+			return -1, nil, nil, fmt.Errorf("create shm tmpfile: %w", err)
 		}
-		os.Remove(f.Name()) // unlink; fd keeps it alive
 	}
+	os.Remove(f.Name()) // unlink; fd keeps it alive
 
 	if err := f.Truncate(int64(size)); err != nil {
 		f.Close()
