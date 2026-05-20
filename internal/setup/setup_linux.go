@@ -115,3 +115,20 @@ func detectMicDevice(ffmpegBin string, log *zap.Logger) string {
 	log.Info("selected microphone", zap.String("device", devices[0]))
 	return devices[0]
 }
+
+func detectLoopbackDevice(ffmpegBin string, log *zap.Logger) string {
+	out, err := runCommand("pactl", "info")
+	if err != nil {
+		log.Warn("pactl not available — using default.monitor", zap.Error(err))
+		return "default.monitor"
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "Default Sink:") {
+			sink := strings.TrimSpace(strings.TrimPrefix(line, "Default Sink:"))
+			if sink != "" {
+				return sink + ".monitor"
+			}
+		}
+	}
+	return "default.monitor"
+}

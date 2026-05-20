@@ -11,6 +11,8 @@ type Config struct {
 	FFmpegBin      string
 	MicDevice      string
 	SystemLoopback bool
+	SystemDevice   string
+	FallbackAudio  string
 	Framerate      int
 	Resolution     string
 	Bitrate        string
@@ -68,12 +70,18 @@ func bitrate(cfg Config) string {
 func audioArgs(cfg Config) (inputArgs []string, audioRefs []string) {
 	ref := 1
 	if cfg.SystemLoopback {
-		inputArgs = append(inputArgs, loopbackInputArgs()...)
-		audioRefs = append(audioRefs, fmt.Sprintf("%d:a", ref))
-		ref++
+		if args := loopbackInputArgs(cfg.SystemDevice); len(args) > 0 {
+			inputArgs = append(inputArgs, args...)
+			audioRefs = append(audioRefs, fmt.Sprintf("%d:a", ref))
+			ref++
+		}
 	}
 	if cfg.MicDevice != "" {
 		inputArgs = append(inputArgs, micInputArgs(cfg.MicDevice)...)
+		audioRefs = append(audioRefs, fmt.Sprintf("%d:a", ref))
+	}
+	if len(audioRefs) == 0 && cfg.FallbackAudio != "" {
+		inputArgs = append(inputArgs, "-stream_loop", "-1", "-i", cfg.FallbackAudio)
 		audioRefs = append(audioRefs, fmt.Sprintf("%d:a", ref))
 	}
 	return
@@ -84,13 +92,17 @@ func audioMixFragment(audioRefs []string) (fragment, label string) {
 	case 0:
 		return "", ""
 	case 1:
-		return fmt.Sprintf(";[%s]anull[aout]", audioRefs[0]), "[aout]"
+		// aresample=async=1000 allows up to 1000ms of clock drift correction
+		// apad pads end of audio to match segment boundaries (avoid truncation in segment muxer)
+		return fmt.Sprintf(";[%s]aresample=async=1000,apad=whole_len=48000[aout]", audioRefs[0]), "[aout]"
 	default:
 		var sb strings.Builder
 		for _, r := range audioRefs {
 			fmt.Fprintf(&sb, "[%s]", r)
 		}
-		fmt.Fprintf(&sb, "amix=inputs=%d:duration=first[aout]", len(audioRefs))
+		fmt.Fprintf(&sb, "amix=inputs=%d:duration=first[amixed]", len(audioRefs))
+		// After mix, apply async resampling + padding for segment alignment
+		fmt.Fprintf(&sb, ";[amixed]aresample=async=1000,apad=whole_len=48000[aout]")
 		return ";" + sb.String(), "[aout]"
 	}
 }

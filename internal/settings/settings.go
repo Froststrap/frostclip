@@ -58,7 +58,7 @@ var defaults = Settings{
 	FPSRaw:         "refresh_rate",
 	Resolution:     "full_screen",
 	Bitrate:        "auto",
-	Audio:          "microphone",
+	Audio:          "system",
 	SegmentTempDir: "",
 }
 
@@ -133,7 +133,7 @@ func Load(log *zap.Logger) (*Settings, error) {
 }
 
 func writeDefaults(path string) error {
-	content := "{\n  \"fps\": \"refresh_rate\",\n  \"resolution\": \"full_screen\",\n  \"bitrate\": \"auto\",\n  \"audio\": \"microphone\",\n  \"segment_temp_dir\": \"\"\n}\n"
+	content := "{\n  \"fps\": \"refresh_rate\",\n  \"resolution\": \"full_screen\",\n  \"bitrate\": \"auto\",\n  \"audio\": \"system\",\n  \"segment_temp_dir\": \"\"\n}\n"
 	return os.WriteFile(path, []byte(content), 0644)
 }
 

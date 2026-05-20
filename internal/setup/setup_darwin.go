@@ -99,3 +99,34 @@ func detectMicDevice(ffmpegBin string, log *zap.Logger) string {
 	log.Warn("no microphone found")
 	return ""
 }
+
+func detectLoopbackDevice(ffmpegBin string, log *zap.Logger) string {
+	log.Info("detecting system audio devices (AVFoundation)")
+	out, _ := runCommand(ffmpegBin, "-f", "avfoundation", "-list_devices", "true", "-i", "dummy")
+
+	inAudio := false
+	re := regexp.MustCompile(`\[(\d+)\] (.+)`)
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "AVFoundation audio devices") {
+			inAudio = true
+			continue
+		}
+		if !inAudio {
+			continue
+		}
+		m := re.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		idx, name := m[1], strings.TrimSpace(m[2])
+		lower := strings.ToLower(name)
+		if strings.Contains(lower, "blackhole") ||
+			strings.Contains(lower, "loopback") ||
+			strings.Contains(lower, "soundflower") {
+			log.Info("selected system loopback", zap.String("device", name), zap.String("index", idx))
+			return idx
+		}
+	}
+	log.Warn("no system loopback device found (install BlackHole/Loopback/Soundflower)")
+	return ""
+}

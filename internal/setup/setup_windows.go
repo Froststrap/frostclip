@@ -94,6 +94,11 @@ func detectMicDevice(ffmpegBin string, log *zap.Logger) string {
 	return devices[0]
 }
 
+func detectLoopbackDevice(ffmpegBin string, log *zap.Logger) string {
+	log.Info("using default system output (WASAPI)")
+	return "default"
+}
+
 func parseDshowAudioDevices(output string) []string {
 	var devices []string
 	re := regexp.MustCompile(`"([^"]+)"\s+\(audio\)`)

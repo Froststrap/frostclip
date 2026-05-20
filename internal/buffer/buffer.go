@@ -86,21 +86,22 @@ func (b *CircularBuffer) Push(path string) {
 	}
 }
 
-// GetLastNSegments ensures we get the requested duration regardless of time drift
+// GetLastNSegments returns the last N finalized segments, skipping the newest (potentially open) segment
 func (b *CircularBuffer) GetLastNSegments(n int) []string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	if b.count == 0 {
-		return nil
+	if b.count <= 1 {
+		return nil // Skip if only 0 or 1 segment (newest always open)
 	}
 	take := n
-	if b.count < n {
-		take = b.count
+	if b.count-1 < n { // -1 to skip the newest
+		take = b.count - 1
 	}
 
 	result := make([]string, 0, take)
-	start := (b.head - take + b.maxSize) % b.maxSize
+	// Start from the head, but go back (take+1) slots to skip the newest segment
+	start := (b.head - take - 1 + b.maxSize) % b.maxSize
 
 	for i := 0; i < take; i++ {
 		idx := (start + i) % b.maxSize

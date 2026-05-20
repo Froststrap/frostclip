@@ -18,6 +18,7 @@ const minFFmpegMajor = 6 // Honestly don't know the minimum needed just to be sa
 type AudioConfig struct {
 	MicDevice      string
 	SystemLoopback bool
+	SystemDevice   string
 }
 
 func EnsureFFmpeg(log *zap.Logger) (string, error) {
@@ -50,17 +51,22 @@ func ResolveAudio(ffmpegBin string, mode settings.AudioMode, log *zap.Logger) Au
 		return AudioConfig{}
 	case settings.AudioSystem:
 		log.Info("system audio only")
-		return AudioConfig{SystemLoopback: true}
+		return AudioConfig{SystemLoopback: true, SystemDevice: detectLoopbackDevice(ffmpegBin, log)}
 	case settings.AudioBoth:
+		system := detectLoopbackDevice(ffmpegBin, log)
 		mic := detectMicDevice(ffmpegBin, log)
 		if mic == "" {
 			log.Warn("no mic found — falling back to system only")
-			return AudioConfig{SystemLoopback: true}
+			return AudioConfig{SystemLoopback: true, SystemDevice: system}
 		}
 		log.Info("system + mic", zap.String("mic", mic))
-		return AudioConfig{MicDevice: mic, SystemLoopback: true}
+		return AudioConfig{MicDevice: mic, SystemLoopback: true, SystemDevice: system}
 	default: // AudioMicrophone
 		mic := detectMicDevice(ffmpegBin, log)
+		if mic == "" {
+			log.Warn("no mic found — falling back to system audio")
+			return AudioConfig{SystemLoopback: true, SystemDevice: detectLoopbackDevice(ffmpegBin, log)}
+		}
 		return AudioConfig{MicDevice: mic}
 	}
 }

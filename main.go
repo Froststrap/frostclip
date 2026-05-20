@@ -14,6 +14,7 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
+	"frostclip/internal/audio"
 	"frostclip/internal/buffer"
 	"frostclip/internal/capture"
 	"frostclip/internal/hotkey"
@@ -195,6 +196,14 @@ func main() {
 	}
 
 	audioCfg := setup.ResolveAudio(ffmpegBin, cfg.AudioMode, log)
+	fallbackAudio := ""
+	if cfg.AudioMode != settings.AudioOff {
+		if path, err := audio.EnsureSilenceFile(); err != nil {
+			log.Warn("could not prepare bundled silence audio", zap.Error(err))
+		} else {
+			fallbackAudio = path
+		}
+	}
 
 	videosDir := platform.ClipsDir()
 	if err := os.MkdirAll(videosDir, 0755); err != nil {
@@ -215,6 +224,8 @@ func main() {
 		FFmpegBin:      ffmpegBin,
 		MicDevice:      audioCfg.MicDevice,
 		SystemLoopback: audioCfg.SystemLoopback,
+		SystemDevice:   audioCfg.SystemDevice,
+		FallbackAudio:  fallbackAudio,
 		Framerate:      cfg.FPS,
 		Resolution:     cfg.Resolution,
 		Bitrate:        cfg.Bitrate,

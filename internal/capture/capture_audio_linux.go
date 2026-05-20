@@ -7,16 +7,21 @@ import (
 	"strings"
 )
 
-func loopbackInputArgs() []string {
+func loopbackInputArgs(device string) []string {
+	if device == "" {
+		device = defaultMonitorSource()
+	}
 	return []string{
 		"-f", "pulse",
-		"-i", defaultMonitorSource(),
+		"-async", "10",
+		"-i", device,
 	}
 }
 
 func micInputArgs(device string) []string {
 	return []string{
 		"-f", "pulse",
+		"-async", "10",
 		"-i", device,
 	}
 }

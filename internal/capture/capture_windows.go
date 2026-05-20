@@ -89,8 +89,11 @@ func orderHWByVendor(all []encoderPipeline, vendor gpuVendor) []encoderPipeline 
 	return append(out, rest...)
 }
 
-func loopbackInputArgs() []string {
-	return []string{"-f", "wasapi", "-loopback", "1", "-i", ""}
+func loopbackInputArgs(device string) []string {
+	if device == "" {
+		device = "default"
+	}
+	return []string{"-f", "wasapi", "-loopback", "1", "-i", device}
 }
 
 func micInputArgs(device string) []string {
@@ -198,7 +201,7 @@ func qsvPipeline() encoderPipeline {
 			audioFrag, audioLabel := audioMixFragment(audioRefs)
 			args = append(args, "-filter_complex", fc+audioFrag, "-map", "[vout]")
 			if audioLabel != "" {
-				args = append(args, "-map", audioLabel, "-acodec", "aac", "-b:v", "128k")
+				args = append(args, "-map", audioLabel, "-acodec", "aac", "-b:a", "128k")
 			}
 			args = append(args,
 				"-vcodec", "h264_qsv",

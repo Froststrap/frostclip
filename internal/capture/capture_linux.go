@@ -107,6 +107,8 @@ func hwVideoArgs(cfg Config, segPattern string, v gpuVendor, inputW, inputH uint
 		"-f", "rawvideo",
 		"-pix_fmt", inputPixFmt,
 		"-s", fmt.Sprintf("%dx%d", w, h),
+		"-fflags", "+genpts",
+		"-use_wallclock_as_timestamps", "1",
 		"-r", fmt.Sprintf("%d", fps),
 		"-i", "pipe:0",
 	}
@@ -359,7 +361,7 @@ type globalCollector struct {
 
 func (c *globalCollector) HandleRegistryGlobal(e wl.RegistryGlobalEvent) {
 	switch e.Interface {
-	case "wl_shm", "ext_image_copy_capture_manager_v1", "ext_output_image_capture_source_manager_v1", "wl_output":
+	case "wl_shm", "ext_image_copy_capture_manager_v1", "ext_output_image_capture_source_manager_v1", "zwlr_screencopy_manager_v1", "wl_output":
 		c.mu.Lock()
 		c.pending = append(c.pending, pendingGlobal{e.Name, e.Interface, e.Version})
 		c.mu.Unlock()
@@ -369,6 +371,22 @@ func (c *globalCollector) HandleRegistryGlobal(e wl.RegistryGlobalEvent) {
 type shmFormatCollector struct {
 	mu      sync.Mutex
 	formats map[uint32]bool
+}
+
+type displayErrorLogger struct {
+	log *zap.Logger
+}
+
+func (d *displayErrorLogger) HandleDisplayError(e wl.DisplayErrorEvent) {
+	objID := uint32(0)
+	if e.ObjectId != nil {
+		objID = uint32(e.ObjectId.Id())
+	}
+	d.log.Error("wayland compositor protocol error",
+		zap.Uint32("object_id", objID),
+		zap.Uint32("code", e.Code),
+		zap.String("message", e.Message),
+	)
 }
 
 func (c *shmFormatCollector) HandleShmFormat(e wl.ShmFormatEvent) {
@@ -392,6 +410,7 @@ func runWaylandCapture(buf *buffer.CircularBuffer, cfg Config, vendor gpuVendor,
 		return fmt.Errorf("wayland connect: %w", err)
 	}
 	defer display.Context().Close()
+	display.AddErrorHandler(&displayErrorLogger{log: log})
 
 	registry, err := display.GetRegistry()
 	if err != nil {
@@ -414,6 +433,8 @@ func runWaylandCapture(buf *buffer.CircularBuffer, cfg Config, vendor gpuVendor,
 	var shm *wl.Shm
 	var mgr *ExtImageCopyCaptureManagerV1
 	var sourceMgr *ExtOutputImageCaptureSourceManagerV1
+	var wlrMgr *WlrScreencopyManagerV1
+	var wlrVersion uint32
 	var output *wl.Output
 
 	collector.mu.Lock()
@@ -441,6 +462,17 @@ func runWaylandCapture(buf *buffer.CircularBuffer, cfg Config, vendor gpuVendor,
 				sourceMgr = NewExtOutputImageCaptureSourceManagerV1(display.Context())
 				if err := registry.Bind(g.name, g.iface, g.version, sourceMgr); err != nil {
 					return fmt.Errorf("bind ext output source manager: %w", err)
+				}
+			}
+		case "zwlr_screencopy_manager_v1":
+			if wlrMgr == nil {
+				wlrMgr = NewWlrScreencopyManagerV1(display.Context())
+				wlrVersion = g.version
+				if wlrVersion > 3 {
+					wlrVersion = 3
+				}
+				if err := registry.Bind(g.name, g.iface, wlrVersion, wlrMgr); err != nil {
+					return fmt.Errorf("bind wlr screencopy manager: %w", err)
 				}
 			}
 		case "wl_output":
@@ -471,6 +503,7 @@ func runWaylandCapture(buf *buffer.CircularBuffer, cfg Config, vendor gpuVendor,
 		zap.Bool("has_shm", shm != nil),
 		zap.Bool("has_manager", mgr != nil),
 		zap.Bool("has_source_manager", sourceMgr != nil),
+		zap.Bool("has_wlr_screencopy", wlrMgr != nil),
 		zap.Bool("has_output", output != nil),
 	)
 
@@ -480,11 +513,12 @@ func runWaylandCapture(buf *buffer.CircularBuffer, cfg Config, vendor gpuVendor,
 	if output == nil {
 		return fmt.Errorf("no wl_output available")
 	}
-	if mgr == nil {
-		return fmt.Errorf("compositor does not support ext_image_copy_capture_manager_v1")
-	}
-	if sourceMgr == nil {
-		return fmt.Errorf("compositor does not support ext_output_image_capture_source_manager_v1")
+	if mgr == nil || sourceMgr == nil {
+		if wlrMgr == nil {
+			return fmt.Errorf("compositor does not support ext_image_copy_capture_manager_v1 or zwlr_screencopy_manager_v1")
+		}
+		log.Info("wayland ext-image-copy not available — falling back to wlr-screencopy")
+		return runWlrScreencopyCapture(display, shm, output, wlrMgr, wlrVersion, cfg, vendor, buf, log)
 	}
 
 	shmFormat := uint32(wl.ShmFormatArgb8888)
@@ -560,8 +594,8 @@ func runWaylandCapture(buf *buffer.CircularBuffer, cfg Config, vendor gpuVendor,
 
 	segPattern := filepath.Join(buf.TempDir(), "seg%06d.ts")
 	waylandCfg := cfg
-	if waylandCfg.Framerate <= 0 || waylandCfg.Framerate > 10 {
-		waylandCfg.Framerate = 10
+	if waylandCfg.Framerate <= 0 || waylandCfg.Framerate > 60 {
+		waylandCfg.Framerate = 60
 	}
 	ffArgs := hwVideoArgs(waylandCfg, segPattern, vendor, width, height, inputPixFmt)
 	log.Debug("wayland: ffmpeg command", zap.String("cmd", fmt.Sprintf("%s %s", cfg.FFmpegBin, strings.Join(ffArgs, " "))))
@@ -587,6 +621,7 @@ func runWaylandCapture(buf *buffer.CircularBuffer, cfg Config, vendor gpuVendor,
 
 	fps := waylandCfg.Framerate
 	frameInterval := time.Second / time.Duration(fps)
+	nextFrame := time.Now()
 
 	slot := 0
 	for {
@@ -646,7 +681,226 @@ func runWaylandCapture(buf *buffer.CircularBuffer, cfg Config, vendor gpuVendor,
 		}
 
 		slot = (slot + 1) % 2
-		time.Sleep(frameInterval)
+		nextFrame = nextFrame.Add(frameInterval)
+		if sleep := time.Until(nextFrame); sleep > 0 {
+			time.Sleep(sleep)
+		} else {
+			nextFrame = time.Now()
+		}
+	}
+}
+
+func runWlrScreencopyCapture(display *wl.Display, shm *wl.Shm, output *wl.Output, mgr *WlrScreencopyManagerV1, mgrVersion uint32, cfg Config, vendor gpuVendor, buf *buffer.CircularBuffer, log *zap.Logger) error {
+	segPattern := filepath.Join(buf.TempDir(), "seg%06d.ts")
+	waylandCfg := cfg
+	if waylandCfg.Framerate <= 0 || waylandCfg.Framerate > 60 {
+		waylandCfg.Framerate = 60
+	}
+
+	var (
+		width, height uint32
+		stride        uint32
+		shmFormat     uint32
+		inputPixFmt   string
+		frameSize     int
+		pool          *wl.ShmPool
+		shmFd         int
+		shmData       []byte
+		cleanupShm    func()
+		started       bool
+		stdin         io.WriteCloser
+		ffCmd         *exec.Cmd
+	)
+
+	startFFmpeg := func() error {
+		ffArgs := hwVideoArgs(waylandCfg, segPattern, vendor, width, height, inputPixFmt)
+		log.Debug("wayland (wlr): ffmpeg command", zap.String("cmd", fmt.Sprintf("%s %s", cfg.FFmpegBin, strings.Join(ffArgs, " "))))
+		ffCmd = exec.Command(cfg.FFmpegBin, ffArgs...)
+		ffCmd.Stderr = os.Stderr
+		var err error
+		stdin, err = ffCmd.StdinPipe()
+		if err != nil {
+			return fmt.Errorf("ffmpeg stdin pipe: %w", err)
+		}
+		if err := ffCmd.Start(); err != nil {
+			return fmt.Errorf("ffmpeg start: %w", err)
+		}
+		setActiveCmd(ffCmd.Process)
+		started = true
+		return nil
+	}
+
+	stopFFmpeg := func() {
+		if !started {
+			return
+		}
+		_ = stdin.Close()
+		_ = ffCmd.Wait()
+		clearActiveCmd()
+		started = false
+	}
+
+	defer func() {
+		stopFFmpeg()
+		if pool != nil {
+			pool.Destroy()
+		}
+		if cleanupShm != nil {
+			cleanupShm()
+		}
+	}()
+
+	watchCtx, watchCancel := context.WithCancel(context.Background())
+	defer watchCancel()
+	go watchSegments(watchCtx, buf, buf.TempDir(), log)
+
+	fps := waylandCfg.Framerate
+	frameInterval := time.Second / time.Duration(fps)
+	nextFrame := time.Now()
+	slot := 0
+
+	{
+		probeFrame, err := mgr.CaptureOutput(output, 0)
+		if err != nil {
+			return fmt.Errorf("wlr probe capture output: %w", err)
+		}
+		bufReady := make(chan error, 1)
+		probeFrame.OnBuffer = func(format, w, h, s uint32) {
+			shmFormat = format
+			width = w
+			height = h
+			stride = s
+			if mgrVersion < 3 {
+				select {
+				case bufReady <- nil:
+				default:
+				}
+			}
+		}
+		probeFrame.OnBufferDone = func() {
+			if mgrVersion >= 3 {
+				select {
+				case bufReady <- nil:
+				default:
+				}
+			}
+		}
+		probeFrame.OnFailed = func() { bufReady <- fmt.Errorf("probe frame failed") }
+		if err := dispatchUntilDone(display, bufReady, 3*time.Second); err != nil {
+			probeFrame.Destroy()
+			return err
+		}
+		probeFrame.Destroy()
+	}
+
+	switch shmFormat {
+	case uint32(wl.ShmFormatXrgb8888):
+		inputPixFmt = "bgr0"
+	case uint32(wl.ShmFormatArgb8888):
+		inputPixFmt = "bgra"
+	default:
+		return fmt.Errorf("unsupported wl_shm format: %d", shmFormat)
+	}
+	if width == 0 || height == 0 {
+		return fmt.Errorf("invalid screencopy buffer size: %dx%d", width, height)
+	}
+	if stride != width*4 {
+		return fmt.Errorf("unsupported screencopy stride: %d (expected %d)", stride, width*4)
+	}
+
+	// Phase 2: allocate shm and start ffmpeg now, before entering the capture loop.
+	frameSize = int(stride * height)
+	poolSize := frameSize * 2
+	var err error
+	shmFd, shmData, cleanupShm, err = allocShm(poolSize)
+	if err != nil {
+		return fmt.Errorf("alloc shm: %w", err)
+	}
+	pool, err = shm.CreatePool(uintptr(shmFd), int32(poolSize))
+	if err != nil {
+		return fmt.Errorf("create shm pool: %w", err)
+	}
+	log.Info("wayland screencopy starting", zap.Uint32("width", width), zap.Uint32("height", height))
+	if err := startFFmpeg(); err != nil {
+		return err
+	}
+
+	// Phase 3: real capture loop — shm and ffmpeg are ready, so Copy is called
+	// immediately after CaptureOutput without any slow setup in between.
+	for {
+		offset := slot * frameSize
+		wlBuf, err := pool.CreateBuffer(
+			int32(offset), int32(width), int32(height),
+			int32(stride),
+			shmFormat,
+		)
+		if err != nil {
+			return fmt.Errorf("create wl_buffer: %w", err)
+		}
+
+		frame, err := mgr.CaptureOutput(output, 0)
+		if err != nil {
+			wlBuf.Destroy()
+			return fmt.Errorf("wlr capture output: %w", err)
+		}
+
+		done := make(chan error, 1)
+		frame.OnReady = func() { done <- nil }
+		frame.OnFailed = func() { done <- fmt.Errorf("frame capture failed") }
+
+		// Dispatch until we get the buffer event (compositor describes the frame),
+		// then immediately Copy — no slow work in between.
+		bufReady := make(chan error, 1)
+		frame.OnBuffer = func(format, w, h, s uint32) {
+			if mgrVersion < 3 {
+				select {
+				case bufReady <- nil:
+				default:
+				}
+			}
+		}
+		frame.OnBufferDone = func() {
+			if mgrVersion >= 3 {
+				select {
+				case bufReady <- nil:
+				default:
+				}
+			}
+		}
+		frame.OnFailed = func() { bufReady <- fmt.Errorf("frame capture failed") }
+		if err := dispatchUntilDone(display, bufReady, 3*time.Second); err != nil {
+			frame.Destroy()
+			wlBuf.Destroy()
+			return err
+		}
+
+		// OnFailed may have fired instead of OnReady; reset for Copy phase.
+		frame.OnFailed = func() { done <- fmt.Errorf("frame capture failed") }
+
+		if err := frame.Copy(wlBuf); err != nil {
+			frame.Destroy()
+			wlBuf.Destroy()
+			return fmt.Errorf("copy frame: %w", err)
+		}
+		frameErr := dispatchUntilDone(display, done, 3*time.Second)
+		frame.Destroy()
+		wlBuf.Destroy()
+		if frameErr != nil {
+			return frameErr
+		}
+
+		frameSlice := shmData[offset : offset+frameSize]
+		if err := writeAll(stdin, frameSlice); err != nil {
+			return fmt.Errorf("write to ffmpeg: %w", err)
+		}
+
+		slot = (slot + 1) % 2
+		nextFrame = nextFrame.Add(frameInterval)
+		if sleep := time.Until(nextFrame); sleep > 0 {
+			time.Sleep(sleep)
+		} else {
+			nextFrame = time.Now()
+		}
 	}
 }
 

@@ -8,10 +8,13 @@ import (
 	"strings"
 )
 
-func loopbackInputArgs() []string {
+func loopbackInputArgs(device string) []string {
+	if device == "" {
+		return nil
+	}
 	return []string{
 		"-f", "avfoundation",
-		"-i", ":0",
+		"-i", fmt.Sprintf(":%s", device),
 	}
 }
 

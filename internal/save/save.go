@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -58,33 +59,143 @@ func saveClip(buf *buffer.CircularBuffer, seconds int, cfg Config, log *zap.Logg
 
 	timestamp := time.Now().Format("2006-01-02_15-04-05")
 	outputPath := filepath.Join(cfg.OutputDir, fmt.Sprintf("clip_%ds_%s.mp4", seconds, timestamp))
+	partPath := outputPath + ".part.mp4"
+	defer os.Remove(partPath)
 
-	cmd := process.Command(cfg.FFmpegBin,
-		"-y", "-f", "concat", "-safe", "0", "-i", tmpFile.Name(),
-		"-map", "0:v:0", "-map", "0:a?",
-		"-c:v", "libx264",
-		"-preset", "veryfast",
-		"-crf", "20",
-		"-pix_fmt", "yuv420p",
-		"-bf", "0",
-		"-movflags", "+faststart",
-		"-c:a", "aac", "-b:a", "128k",
-		outputPath,
-	)
+	strategies := saveStrategies()
+	var lastErr error
+	for _, s := range strategies {
+		_ = os.Remove(partPath)
+		args := append([]string{
+			"-y", "-f", "concat", "-safe", "0", "-i", tmpFile.Name(),
+			"-map", "0:v:0", "-map", "0:a?",
+		}, s.args...)
+		args = append(args, partPath)
 
-	if out, err := cmd.CombinedOutput(); err != nil {
-		log.Error("ffmpeg error", zap.ByteString("out", out))
-		return err
+		cmd := process.Command(cfg.FFmpegBin, args...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			lastErr = err
+			log.Debug("save strategy failed",
+				zap.String("strategy", s.name),
+				zap.Error(err),
+				zap.ByteString("out", out),
+			)
+			continue
+		}
+		if err := os.Rename(partPath, outputPath); err != nil {
+			return err
+		}
+		log.Info("clip saved!", zap.String("path", outputPath), zap.String("strategy", s.name))
+		notify.SendWithAction(
+			"Clip Saved",
+			fmt.Sprintf("Saved the last %d seconds.", seconds),
+			"Folder",
+			outputPath,
+		)
+		return nil
+	}
+	if lastErr != nil {
+		return lastErr
+	}
+	return fmt.Errorf("no save strategies available")
+}
+
+type saveStrategy struct {
+	name string
+	args []string
+}
+
+func saveStrategies() []saveStrategy {
+	strategies := []saveStrategy{
+		{
+			name: "copy-remux",
+			args: []string{
+				"-c", "copy",
+				"-movflags", "+faststart",
+			},
+		},
 	}
 
-	log.Info("clip saved!", zap.String("path", outputPath))
+	switch runtime.GOOS {
+	case "linux":
+		strategies = append(strategies, saveStrategy{
+			name: "vaapi",
+			args: []string{
+				"-af", "aresample=async=1:first_pts=0,apad",
+				"-init_hw_device", "vaapi=va:/dev/dri/renderD128",
+				"-filter_hw_device", "va",
+				"-vf", "format=nv12,hwupload",
+				"-c:v", "h264_vaapi",
+				"-qp", "23",
+				"-bf", "0",
+				"-c:a", "aac", "-b:a", "128k",
+				"-shortest",
+				"-movflags", "+faststart",
+			},
+		})
+	case "windows":
+		strategies = append(strategies,
+			saveStrategy{
+				name: "nvenc",
+				args: []string{
+					"-af", "aresample=async=1:first_pts=0,apad",
+					"-c:v", "h264_nvenc", "-preset", "p4", "-cq", "23", "-b:v", "0", "-bf", "0",
+					"-pix_fmt", "yuv420p",
+					"-c:a", "aac", "-b:a", "128k",
+					"-shortest",
+					"-movflags", "+faststart",
+				},
+			},
+			saveStrategy{
+				name: "qsv",
+				args: []string{
+					"-af", "aresample=async=1:first_pts=0,apad",
+					"-c:v", "h264_qsv", "-global_quality", "23", "-look_ahead", "0", "-bf", "0",
+					"-pix_fmt", "yuv420p",
+					"-c:a", "aac", "-b:a", "128k",
+					"-shortest",
+					"-movflags", "+faststart",
+				},
+			},
+			saveStrategy{
+				name: "amf",
+				args: []string{
+					"-af", "aresample=async=1:first_pts=0,apad",
+					"-c:v", "h264_amf", "-quality", "speed", "-rc", "cqp", "-qp_i", "23", "-qp_p", "23",
+					"-pix_fmt", "yuv420p",
+					"-c:a", "aac", "-b:a", "128k",
+					"-shortest",
+					"-movflags", "+faststart",
+				},
+			},
+		)
+	case "darwin":
+		strategies = append(strategies, saveStrategy{
+			name: "videotoolbox",
+			args: []string{
+				"-af", "aresample=async=1:first_pts=0,apad",
+				"-c:v", "h264_videotoolbox",
+				"-pix_fmt", "yuv420p",
+				"-c:a", "aac", "-b:a", "128k",
+				"-shortest",
+				"-movflags", "+faststart",
+			},
+		})
+	}
 
-	notify.SendWithAction(
-		"Clip Saved",
-		fmt.Sprintf("Saved the last %d seconds.", seconds),
-		"Folder",
-		outputPath,
-	)
-
-	return nil
+	strategies = append(strategies, saveStrategy{
+		name: "libx264-ultrafast",
+		args: []string{
+			"-af", "aresample=async=1:first_pts=0,apad",
+			"-c:v", "libx264",
+			"-preset", "ultrafast",
+			"-crf", "23",
+			"-pix_fmt", "yuv420p",
+			"-bf", "0",
+			"-movflags", "+faststart",
+			"-c:a", "aac", "-b:a", "128k",
+			"-shortest",
+		},
+	})
+	return strategies
 }
