@@ -7,6 +7,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
+
+	"github.com/fsnotify/fsnotify"
 
 	"frostclip/internal/platform"
 
@@ -49,6 +53,7 @@ type Settings struct {
 	Bitrate        string `json:"bitrate"`
 	Audio          string `json:"audio"`
 	SegmentTempDir string `json:"segment_temp_dir"`
+	AutoUpload     bool   `json:"auto_upload"` // auto-upload clips to FrostClip and copy link
 
 	FPS       int       `json:"-"`
 	AudioMode AudioMode `json:"-"`
@@ -60,6 +65,7 @@ var defaults = Settings{
 	Bitrate:        "auto",
 	Audio:          "system",
 	SegmentTempDir: "",
+	AutoUpload:     false,
 }
 
 func Load(log *zap.Logger) (*Settings, error) {
@@ -128,12 +134,13 @@ func Load(log *zap.Logger) (*Settings, error) {
 		zap.String("bitrate", s.Bitrate),
 		zap.String("audio", string(s.AudioMode)),
 		zap.String("segment_temp_dir", s.SegmentTempDir),
+		zap.Bool("auto_upload", s.AutoUpload),
 	)
 	return &s, nil
 }
 
 func writeDefaults(path string) error {
-	content := "{\n  \"fps\": \"refresh_rate\",\n  \"resolution\": \"full_screen\",\n  \"bitrate\": \"auto\",\n  \"audio\": \"system\",\n  \"segment_temp_dir\": \"\"\n}\n"
+	content := "{\n  \"fps\": \"refresh_rate\",\n  \"resolution\": \"full_screen\",\n  \"bitrate\": \"auto\",\n  \"audio\": \"system\",\n  \"segment_temp_dir\": \"\",\n  \"auto_upload\": false\n}\n"
 	return os.WriteFile(path, []byte(content), 0644)
 }
 
@@ -144,3 +151,223 @@ func settingsFilePath() (string, error) {
 	}
 	return filepath.Join(filepath.Dir(exe), "settings.json"), nil
 }
+
+// SettingsUpdate represents a settings change notification
+type SettingsUpdate struct {
+	Settings *Settings
+	Changed  map[string]bool // which fields changed
+}
+
+// Watcher monitors settings.json for changes and broadcasts updates
+type Watcher struct {
+	log      *zap.Logger
+	updateCh chan SettingsUpdate
+	stopCh   chan struct{}
+	mu       sync.Mutex
+	last     *Settings
+	watcher  *fsnotify.Watcher
+	done     chan struct{}
+}
+
+// NewWatcher creates a new settings file watcher
+func NewWatcher(log *zap.Logger) (*Watcher, error) {
+	log = log.Named("settings.watcher")
+	fw, err := fsnotify.NewWatcher()
+	if err != nil {
+		return nil, err
+	}
+
+	settingsPath, err := settingsFilePath()
+	if err != nil {
+		fw.Close()
+		return nil, err
+	}
+
+	// Watch the directory, not the file (file replacement on save creates a new inode)
+	if err := fw.Add(filepath.Dir(settingsPath)); err != nil {
+		fw.Close()
+		return nil, err
+	}
+
+	return &Watcher{
+		log:      log,
+		updateCh: make(chan SettingsUpdate, 1),
+		stopCh:   make(chan struct{}),
+		watcher:  fw,
+		done:     make(chan struct{}),
+	}, nil
+}
+
+// Watch starts watching for settings changes and returns a channel for updates
+// It handles debouncing and error recovery automatically
+func (w *Watcher) Watch() <-chan SettingsUpdate {
+	go w.run()
+	return w.updateCh
+}
+
+func (w *Watcher) run() {
+	defer close(w.done)
+	defer w.watcher.Close()
+
+	debounceTimer := time.NewTimer(100 * time.Millisecond)
+	debounceTimer.Stop()
+	var debounceActive bool
+
+	for {
+		select {
+		case <-w.stopCh:
+			return
+		case event, ok := <-w.watcher.Events:
+			if !ok {
+				return
+			}
+			// Only care about writes to settings.json
+			if !strings.HasSuffix(event.Name, "settings.json") {
+				continue
+			}
+			if event.Op&(fsnotify.Write|fsnotify.Create) == 0 {
+				continue
+			}
+			// Start/restart debounce timer
+			if debounceActive {
+				debounceTimer.Stop()
+			}
+			debounceTimer.Reset(100 * time.Millisecond)
+			debounceActive = true
+
+		case <-debounceTimer.C:
+			debounceActive = false
+			// Load and validate new settings
+			if updated, changes := w.loadAndNotify(); updated {
+				w.log.Info("settings updated", zap.Any("changes", changes))
+			}
+
+		case err, ok := <-w.watcher.Errors:
+			if !ok {
+				return
+			}
+			w.log.Warn("watcher error", zap.Error(err))
+		}
+	}
+}
+
+func (w *Watcher) loadAndNotify() (bool, map[string]bool) {
+	settingsPath, err := settingsFilePath()
+	if err != nil {
+		w.log.Warn("could not get settings path", zap.Error(err))
+		return false, nil
+	}
+
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		w.log.Warn("could not read settings.json", zap.Error(err))
+		return false, nil
+	}
+
+	s := defaults
+	if err := json.Unmarshal(data, &s); err != nil {
+		w.log.Warn("invalid settings.json", zap.Error(err))
+		return false, nil
+	}
+
+	// Process resolution and fps like the Load function
+	if strings.ToLower(s.Resolution) == "full_screen" {
+		width, height, err := platform.ScreenResolution()
+		if err != nil {
+			w.log.Debug("could not detect screen resolution", zap.Error(err))
+			width, height = 1920, 1080
+		}
+		s.Resolution = fmt.Sprintf("%dx%d", width, height)
+	}
+
+	// Process FPS
+	switch v := s.FPSRaw.(type) {
+	case string:
+		if strings.ToLower(v) == "refresh_rate" {
+			hz, err := platform.RefreshRate()
+			if err != nil {
+				w.log.Debug("could not detect refresh rate", zap.Error(err))
+				hz = 60
+			}
+			s.FPS = hz
+		} else {
+			s.FPS = 60
+		}
+	case float64:
+		s.FPS = int(v)
+	default:
+		s.FPS = 60
+	}
+
+	// Process bitrate
+	if s.Bitrate == "" || strings.ToLower(s.Bitrate) == "auto" {
+		s.Bitrate = bitrateForResolutionAndFPS(s.Resolution, s.FPS)
+	}
+
+	// Process audio mode
+	switch AudioMode(strings.ToLower(s.Audio)) {
+	case AudioSystem, AudioBoth, AudioOff:
+		s.AudioMode = AudioMode(strings.ToLower(s.Audio))
+	default:
+		s.AudioMode = AudioMicrophone
+	}
+
+	s.SegmentTempDir = strings.TrimSpace(s.SegmentTempDir)
+
+	// Determine what changed
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	changes := make(map[string]bool)
+	if w.last != nil {
+		if w.last.FPS != s.FPS {
+			changes["fps"] = true
+		}
+		if w.last.Resolution != s.Resolution {
+			changes["resolution"] = true
+		}
+		if w.last.Bitrate != s.Bitrate {
+			changes["bitrate"] = true
+		}
+		if w.last.AudioMode != s.AudioMode {
+			changes["audio"] = true
+		}
+		if w.last.SegmentTempDir != s.SegmentTempDir {
+			changes["segment_temp_dir"] = true
+		}
+		if w.last.AutoUpload != s.AutoUpload {
+			changes["auto_upload"] = true
+		}
+
+		// If nothing changed, don't notify
+		if len(changes) == 0 {
+			return false, nil
+		}
+	} else {
+		// First load, mark all as changed
+		changes["fps"] = true
+		changes["resolution"] = true
+		changes["bitrate"] = true
+		changes["audio"] = true
+		changes["segment_temp_dir"] = true
+		changes["auto_upload"] = true
+	}
+
+	w.last = &s
+
+	// Send update through channel (non-blocking)
+	select {
+	case w.updateCh <- SettingsUpdate{Settings: &s, Changed: changes}:
+	default:
+		// Channel full, skip update (shouldn't happen with buffer size 1)
+	}
+
+	return true, changes
+}
+
+// Stop stops the watcher
+func (w *Watcher) Stop() {
+	close(w.stopCh)
+	<-w.done
+}
+

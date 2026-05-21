@@ -314,7 +314,46 @@ func Loop(buf *buffer.CircularBuffer, cfg Config, log *zap.Logger) {
 func x11Loop(buf *buffer.CircularBuffer, cfg Config, log *zap.Logger) {
 	vendor := detectGPUVendor()
 	log.Info("x11grab detected GPU vendor", zap.Int("vendor", int(vendor)))
+
+	// Start settings update monitor
+	settingsChan := make(chan Config, 1)
+	if cfg.UpdateCh != nil {
+		go func() {
+			for update := range cfg.UpdateCh {
+				newCfg := cfg
+				newCfg.Framerate = update.Settings.FPS
+				newCfg.Resolution = update.Settings.Resolution
+				newCfg.Bitrate = update.Settings.Bitrate
+
+				if update.Changed["fps"] || update.Changed["resolution"] || update.Changed["bitrate"] {
+					log.Info("capture settings changed",
+						zap.Bool("fps", update.Changed["fps"]),
+						zap.Bool("resolution", update.Changed["resolution"]),
+						zap.Bool("bitrate", update.Changed["bitrate"]),
+					)
+					settingsChan <- newCfg
+				}
+			}
+		}()
+	}
+
 	for {
+		// Check for settings update
+		select {
+		case newCfg := <-settingsChan:
+			cfg = newCfg
+			log.Info("applying new capture settings",
+				zap.Int("fps", cfg.Framerate),
+				zap.String("resolution", cfg.Resolution),
+				zap.String("bitrate", cfg.Bitrate),
+			)
+			// Kill current FFmpeg process to force restart with new settings
+			Kill()
+			time.Sleep(500 * time.Millisecond)
+			continue
+		default:
+		}
+
 		segPattern := filepath.Join(buf.TempDir(), "seg%06d.ts")
 		args := x11GrabArgs(cfg, segPattern, vendor)
 		cmd := exec.Command(cfg.FFmpegBin, args...)
@@ -344,7 +383,46 @@ func waylandLoop(buf *buffer.CircularBuffer, cfg Config, log *zap.Logger) {
 	vendor := detectGPUVendor()
 	log.Info("wayland detected GPU vendor", zap.Int("vendor", int(vendor)))
 	consecErr := 0
+
+	// Start settings update monitor
+	settingsChan := make(chan Config, 1)
+	if cfg.UpdateCh != nil {
+		go func() {
+			for update := range cfg.UpdateCh {
+				newCfg := cfg
+				newCfg.Framerate = update.Settings.FPS
+				newCfg.Resolution = update.Settings.Resolution
+				newCfg.Bitrate = update.Settings.Bitrate
+
+				if update.Changed["fps"] || update.Changed["resolution"] || update.Changed["bitrate"] {
+					log.Info("capture settings changed",
+						zap.Bool("fps", update.Changed["fps"]),
+						zap.Bool("resolution", update.Changed["resolution"]),
+						zap.Bool("bitrate", update.Changed["bitrate"]),
+					)
+					settingsChan <- newCfg
+				}
+			}
+		}()
+	}
+
 	for {
+		// Check for settings update
+		select {
+		case newCfg := <-settingsChan:
+			cfg = newCfg
+			log.Info("applying new capture settings",
+				zap.Int("fps", cfg.Framerate),
+				zap.String("resolution", cfg.Resolution),
+				zap.String("bitrate", cfg.Bitrate),
+			)
+			// Kill current FFmpeg process to force restart with new settings
+			Kill()
+			time.Sleep(500 * time.Millisecond)
+			continue
+		default:
+		}
+
 		err := runWaylandCapture(buf, cfg, vendor, log)
 		if err != nil {
 			consecErr++

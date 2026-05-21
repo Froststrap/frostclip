@@ -187,6 +187,14 @@ func main() {
 		log.Fatal("could not load settings.json", zap.Error(err))
 	}
 
+	// Start settings watcher
+	watcher, err := settings.NewWatcher(log)
+	if err != nil {
+		log.Fatal("could not create settings watcher", zap.Error(err))
+	}
+	updateCh := watcher.Watch()
+	defer watcher.Stop()
+
 	ffmpegBin, err := setup.EnsureFFmpeg(log)
 	if err != nil {
 		log.Fatal("could not set up FFmpeg", zap.Error(err))
@@ -229,13 +237,16 @@ func main() {
 		Framerate:      cfg.FPS,
 		Resolution:     cfg.Resolution,
 		Bitrate:        cfg.Bitrate,
+		UpdateCh:       updateCh,
 	}
 	go capture.Loop(buf, capCfg, log)
 	go hotkey.Listen(saveChan, log)
 
 	saveCfg := save.Config{
-		FFmpegBin: ffmpegBin,
-		OutputDir: videosDir,
+		FFmpegBin:     ffmpegBin,
+		OutputDir:     videosDir,
+		AutoUpload:    cfg.AutoUpload,
+		UpdateCh:      updateCh,
 	}
 	go save.Handler(buf, saveChan, saveCfg, log)
 

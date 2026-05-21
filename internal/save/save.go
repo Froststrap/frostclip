@@ -10,20 +10,39 @@ import (
 
 	"frostclip/internal/buffer"
 	"frostclip/internal/capture"
+	"frostclip/internal/clipboard"
 	"frostclip/internal/hotkey"
 	"frostclip/internal/notify"
 	"frostclip/internal/process"
+	"frostclip/internal/settings"
+	"frostclip/internal/upload"
+	"frostclip/internal/userdata"
 
 	"go.uber.org/zap"
 )
 
 type Config struct {
-	FFmpegBin string
-	OutputDir string
+	FFmpegBin  string
+	OutputDir  string
+	AutoUpload bool
+	UpdateCh   <-chan settings.SettingsUpdate
 }
 
 func Handler(buf *buffer.CircularBuffer, saveChan <-chan hotkey.SaveRequest, cfg Config, log *zap.Logger) {
 	log = log.Named("save")
+
+	// Start listening for setting updates
+	if cfg.UpdateCh != nil {
+		go func() {
+			for update := range cfg.UpdateCh {
+				if update.Changed["auto_upload"] {
+					cfg.AutoUpload = update.Settings.AutoUpload
+					log.Info("auto_upload setting changed", zap.Bool("enabled", cfg.AutoUpload))
+				}
+			}
+		}()
+	}
+
 	for req := range saveChan {
 		go func(r hotkey.SaveRequest) {
 			if err := saveClip(buf, r.Seconds, cfg, log); err != nil {
@@ -92,6 +111,30 @@ func saveClip(buf *buffer.CircularBuffer, seconds int, cfg Config, log *zap.Logg
 			"Folder",
 			outputPath,
 		)
+
+		// Auto-upload to FrostClip if enabled — runs in background, doesn't block local save
+		if cfg.AutoUpload {
+			go func() {
+				ud, err := userdata.Load()
+				if err != nil || !ud.LoggedIn() {
+					log.Warn("auto_upload enabled but not logged in — skipping upload")
+					notify.Send("FrostClip", "Log in to FrostClip to enable auto-upload.")
+					return
+				}
+				clipURL, err := upload.ClipToAPI(outputPath, ud.AccessToken, log)
+				if err != nil {
+					log.Warn("upload to FrostClip failed", zap.Error(err))
+					notify.Send("FrostClip Upload Failed", "Could not upload clip — check your connection.")
+					return
+				}
+				if err := clipboard.Write(clipURL); err != nil {
+					log.Warn("failed to copy clip URL to clipboard", zap.Error(err))
+				}
+				log.Info("clip uploaded and link copied", zap.String("url", clipURL))
+				notify.Send("FrostClip — Link Copied!", clipURL)
+			}()
+		}
+
 		return nil
 	}
 	if lastErr != nil {

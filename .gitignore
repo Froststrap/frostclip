@@ -4,8 +4,10 @@ frostclip-mac
 frostclip.syso
 
 go.sum
+.env
 
 settings.json
+data.json
 
 ffmpeg/
 logs/

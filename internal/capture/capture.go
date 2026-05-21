@@ -5,6 +5,8 @@ import (
 	"os"
 	"strings"
 	"sync"
+
+	"frostclip/internal/settings"
 )
 
 type Config struct {
@@ -16,6 +18,7 @@ type Config struct {
 	Framerate      int
 	Resolution     string
 	Bitrate        string
+	UpdateCh       <-chan settings.SettingsUpdate
 }
 
 func (c Config) hasAudio() bool {
