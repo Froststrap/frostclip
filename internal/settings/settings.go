@@ -12,6 +12,7 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 
+	"frostclip/internal/notify"
 	"frostclip/internal/platform"
 
 	"go.uber.org/zap"
@@ -47,13 +48,17 @@ const (
 	AudioOff        AudioMode = "off"
 )
 
+// VolumeMixer controls per-application volume levels by process name or ID
+type VolumeMixer map[string]float64 // key: process name or PID (string), value: volume 0-100
+
 type Settings struct {
-	FPSRaw         any    `json:"fps"`
-	Resolution     string `json:"resolution"`
-	Bitrate        string `json:"bitrate"`
-	Audio          string `json:"audio"`
-	SegmentTempDir string `json:"segment_temp_dir"`
-	AutoUpload     bool   `json:"auto_upload"` // auto-upload clips to FrostClip and copy link
+	FPSRaw         any         `json:"fps"`
+	Resolution     string      `json:"resolution"`
+	Bitrate        string      `json:"bitrate"`
+	Audio          string      `json:"audio"`
+	SegmentTempDir string      `json:"segment_temp_dir"`
+	AutoUpload     bool        `json:"auto_upload"` // auto-upload clips to FrostClip and copy link
+	VolumeMixer    VolumeMixer `json:"volume_mixer"` // per-app volume control
 
 	FPS       int       `json:"-"`
 	AudioMode AudioMode `json:"-"`
@@ -66,6 +71,7 @@ var defaults = Settings{
 	Audio:          "system",
 	SegmentTempDir: "",
 	AutoUpload:     false,
+	VolumeMixer:    VolumeMixer{},
 }
 
 func Load(log *zap.Logger) (*Settings, error) {
@@ -140,7 +146,7 @@ func Load(log *zap.Logger) (*Settings, error) {
 }
 
 func writeDefaults(path string) error {
-	content := "{\n  \"fps\": \"refresh_rate\",\n  \"resolution\": \"full_screen\",\n  \"bitrate\": \"auto\",\n  \"audio\": \"system\",\n  \"segment_temp_dir\": \"\",\n  \"auto_upload\": false\n}\n"
+	content := "{\n  \"fps\": \"refresh_rate\",\n  \"resolution\": \"full_screen\",\n  \"bitrate\": \"auto\",\n  \"audio\": \"system\",\n  \"segment_temp_dir\": \"\",\n  \"auto_upload\": false,\n  \"volume_mixer\": {\n    \"discord\": 100,\n    \"firefox\": 100\n  }\n}\n"
 	return os.WriteFile(path, []byte(content), 0644)
 }
 
@@ -355,6 +361,9 @@ func (w *Watcher) loadAndNotify() (bool, map[string]bool) {
 
 	w.last = &s
 
+	// Build notification message
+	notifyMsg := w.buildNotificationMessage(changes, &s)
+
 	// Send update through channel (non-blocking)
 	select {
 	case w.updateCh <- SettingsUpdate{Settings: &s, Changed: changes}:
@@ -362,7 +371,59 @@ func (w *Watcher) loadAndNotify() (bool, map[string]bool) {
 		// Channel full, skip update (shouldn't happen with buffer size 1)
 	}
 
+	// Send desktop notification (non-blocking, in background)
+	if notifyMsg != "" && len(changes) > 0 && w.last != nil {
+		go func() {
+			notify.Send("FrostClip Settings Changed", notifyMsg)
+		}()
+	}
+
 	return true, changes
+}
+
+// buildNotificationMessage creates a user-friendly notification message
+func (w *Watcher) buildNotificationMessage(changes map[string]bool, s *Settings) string {
+	var parts []string
+
+	if changes["fps"] {
+		parts = append(parts, fmt.Sprintf("FPS: %d", s.FPS))
+	}
+	if changes["resolution"] {
+		parts = append(parts, fmt.Sprintf("Resolution: %s", s.Resolution))
+	}
+	if changes["bitrate"] {
+		parts = append(parts, fmt.Sprintf("Bitrate: %s", s.Bitrate))
+	}
+	if changes["audio"] {
+		parts = append(parts, fmt.Sprintf("Audio: %s", s.AudioMode))
+	}
+	if changes["auto_upload"] {
+		if s.AutoUpload {
+			parts = append(parts, "Auto-upload: ON")
+		} else {
+			parts = append(parts, "Auto-upload: OFF")
+		}
+	}
+	if changes["segment_temp_dir"] {
+		if s.SegmentTempDir != "" {
+			parts = append(parts, fmt.Sprintf("Temp dir: %s", s.SegmentTempDir))
+		} else {
+			parts = append(parts, "Temp dir: default")
+		}
+	}
+	if changes["volume_mixer"] {
+		if len(s.VolumeMixer) > 0 {
+			parts = append(parts, fmt.Sprintf("Volume mixer: %d app(s)", len(s.VolumeMixer)))
+		} else {
+			parts = append(parts, "Volume mixer: disabled")
+		}
+	}
+
+	if len(parts) == 0 {
+		return ""
+	}
+
+	return strings.Join(parts, "\n")
 }
 
 // Stop stops the watcher

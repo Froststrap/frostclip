@@ -427,23 +427,6 @@ func waylandLoop(buf *buffer.CircularBuffer, cfg Config, log *zap.Logger) {
 		if err != nil {
 			consecErr++
 			log.Warn("wayland capture error — retrying in 1s", zap.Error(err), zap.Int("consecutive", consecErr))
-			// If failing repeatedly, try wf-recorder fallback
-			if consecErr >= 3 {
-				wfPath, wfErr := exec.LookPath("wf-recorder")
-				if wfErr != nil {
-					// notify user once
-					notify.Send("FrostClip: Wayland fallback missing", "wf-recorder not found. Install wf-recorder for automatic Wayland fallback.")
-					log.Warn("wf-recorder not found; cannot fallback")
-				} else {
-					log.Info("attempting wf-recorder fallback", zap.String("wf-recorder", wfPath))
-					if fbErr := runWfFallback(buf, cfg, log); fbErr != nil {
-						log.Warn("wf-recorder fallback failed", zap.Error(fbErr))
-					} else {
-						log.Info("wf-recorder fallback finished; resuming main capture")
-					}
-				}
-				consecErr = 0
-			}
 			time.Sleep(time.Second)
 			continue
 		}
@@ -707,6 +690,16 @@ func runWaylandCapture(buf *buffer.CircularBuffer, cfg Config, vendor gpuVendor,
 		return runWlrScreencopyCapture(display, shm, output, wlrMgr, wlrVersion, cfg, vendor, buf, log)
 	}
 
+	// Try ext-image-copy capture; fall back to wlr-screencopy if it fails
+	extErr := runExtImageCopyCapture(display, shm, output, mgr, sourceMgr, shmFormats, cfg, vendor, buf, log)
+	if extErr != nil && wlrMgr != nil {
+		log.Warn("ext-image-copy capture failed, falling back to wlr-screencopy", zap.Error(extErr))
+		return runWlrScreencopyCapture(display, shm, output, wlrMgr, wlrVersion, cfg, vendor, buf, log)
+	}
+	return extErr
+}
+
+func runExtImageCopyCapture(display *wl.Display, shm *wl.Shm, output *wl.Output, mgr *ExtImageCopyCaptureManagerV1, sourceMgr *ExtOutputImageCaptureSourceManagerV1, shmFormats *shmFormatCollector, cfg Config, vendor gpuVendor, buf *buffer.CircularBuffer, log *zap.Logger) error {
 	shmFormat := uint32(wl.ShmFormatArgb8888)
 	inputPixFmt := "bgra"
 

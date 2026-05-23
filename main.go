@@ -213,6 +213,13 @@ func main() {
 		}
 	}
 
+	// Initialize volume mixer
+	volumeMixer := audio.NewVolumeMixer(cfg.VolumeMixer, log)
+	defer volumeMixer.Close()
+	if err := volumeMixer.ApplyMix(); err != nil {
+		log.Warn("could not apply volume mixer", zap.Error(err))
+	}
+
 	videosDir := platform.ClipsDir()
 	if err := os.MkdirAll(videosDir, 0755); err != nil {
 		log.Fatal("could not create clips directory", zap.Error(err))
@@ -249,6 +256,18 @@ func main() {
 		UpdateCh:      updateCh,
 	}
 	go save.Handler(buf, saveChan, saveCfg, log)
+
+	// Listen for volume mixer config changes
+	go func() {
+		for update := range updateCh {
+			if update.Changed["volume_mixer"] {
+				log.Info("volume mixer settings changed")
+				if err := volumeMixer.UpdateConfig(update.Settings.VolumeMixer); err != nil {
+					log.Warn("could not update volume mixer", zap.Error(err))
+				}
+			}
+		}
+	}()
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
