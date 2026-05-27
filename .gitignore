@@ -1,6 +1,7 @@
 frostclip.exe
 frostclip-linux
-frostclip-mac
+frostclip-macos-arm64
+frostclip-macos-amd64
 frostclip.syso
 
 go.sum
