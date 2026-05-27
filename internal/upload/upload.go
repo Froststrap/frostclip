@@ -9,11 +9,12 @@ import (
 	"os"
 	"time"
 
+	"frostclip/internal/clipboard"
+
 	"go.uber.org/zap"
 )
 
-// apiURL is the hardcoded FrostClip backend — not user-configurable.
-const apiURL = "https://frostclip.fly.dev"
+const apiURL = "https://froststrap-website-backend.onrender.com/"
 
 type uploadURLResponse struct {
 	UploadID  string `json:"upload_id"`
@@ -48,6 +49,20 @@ func ClipToAPI(clipPath string, accessToken string, log *zap.Logger) (string, er
 	}
 
 	return clipURL, nil
+}
+
+func ClipToAPIAndCopy(clipPath string, accessToken string, log *zap.Logger) (string, bool, error) {
+	clipURL, err := ClipToAPI(clipPath, accessToken, log)
+	if err != nil {
+		return "", false, err
+	}
+
+	if err := clipboard.Write(clipURL); err != nil {
+		log.Warn("failed to copy clip URL to clipboard", zap.Error(err))
+		return clipURL, false, nil
+	}
+
+	return clipURL, true, nil
 }
 
 func requestUploadURL(accessToken string) (*uploadURLResponse, error) {

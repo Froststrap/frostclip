@@ -15,14 +15,18 @@ import (
 	"go.uber.org/zap/zapcore"
 
 	"frostclip/internal/audio"
+	"frostclip/internal/authflow"
+	"frostclip/internal/browser"
 	"frostclip/internal/buffer"
 	"frostclip/internal/capture"
 	"frostclip/internal/hotkey"
+	"frostclip/internal/notify"
 	"frostclip/internal/platform"
 	"frostclip/internal/save"
 	"frostclip/internal/settings"
 	"frostclip/internal/setup"
 	"frostclip/internal/tray"
+	"frostclip/internal/userdata"
 )
 
 //go:embed froststrap.ico
@@ -187,6 +191,40 @@ func main() {
 		log.Fatal("could not load settings.json", zap.Error(err))
 	}
 
+	ud, err := userdata.Load()
+	if err != nil {
+		log.Warn("could not load user data", zap.Error(err))
+	} else if !ud.LoggedIn() {
+		log.Info("no login credentials detected — starting auth flow")
+		callbackURL, tokenCh, stopAuth, err := authflow.StartCallbackServer(log)
+		if err != nil {
+			log.Warn("could not start auth callback server", zap.Error(err))
+			authURL := authflow.AuthURL("")
+			if err := browser.Open(authURL); err != nil {
+				log.Warn("could not open auth page in browser", zap.Error(err))
+				notify.Send("FrostClip Login", fmt.Sprintf("Open this link to log in:\n%s", authURL))
+			}
+		} else {
+			defer stopAuth()
+			loginURL := authflow.AuthURL(callbackURL)
+			if err := browser.Open(loginURL); err != nil {
+				log.Warn("could not open auth page in browser", zap.Error(err))
+				notify.Send("FrostClip Login", fmt.Sprintf("Open this link to log in:\n%s", loginURL))
+			}
+			go func() {
+				token := <-tokenCh
+				saved, err := authflow.SaveTokenLogin(token)
+				if err != nil {
+					log.Warn("could not save login data", zap.Error(err))
+					notify.Send("FrostClip Login Failed", "Login completed but credentials could not be saved.")
+					return
+				}
+				log.Info("login saved", zap.String("discord_id", saved.DiscordID), zap.String("username", saved.DiscordUsername))
+				notify.Send("FrostClip Logged In", "Login saved. Auto-upload is ready.")
+			}()
+		}
+	}
+
 	// Start settings watcher
 	watcher, err := settings.NewWatcher(log)
 	if err != nil {
@@ -250,12 +288,12 @@ func main() {
 	go hotkey.Listen(saveChan, log)
 
 	saveCfg := save.Config{
-		FFmpegBin:     ffmpegBin,
-		OutputDir:     videosDir,
-		AutoUpload:    cfg.AutoUpload,
-		UpdateCh:      updateCh,
+		FFmpegBin:  ffmpegBin,
+		OutputDir:  videosDir,
+		AutoUpload: cfg.AutoUpload,
+		UpdateCh:   updateCh,
 	}
-	go save.Handler(buf, saveChan, saveCfg, log)
+	go save.Handler(buf, saveChan, &saveCfg, log)
 
 	// Listen for volume mixer config changes
 	go func() {

@@ -6,11 +6,11 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"frostclip/internal/buffer"
 	"frostclip/internal/capture"
-	"frostclip/internal/clipboard"
 	"frostclip/internal/hotkey"
 	"frostclip/internal/notify"
 	"frostclip/internal/process"
@@ -26,9 +26,22 @@ type Config struct {
 	OutputDir  string
 	AutoUpload bool
 	UpdateCh   <-chan settings.SettingsUpdate
+	mu         sync.RWMutex
 }
 
-func Handler(buf *buffer.CircularBuffer, saveChan <-chan hotkey.SaveRequest, cfg Config, log *zap.Logger) {
+func (c *Config) SetAutoUpload(enabled bool) {
+	c.mu.Lock()
+	c.AutoUpload = enabled
+	c.mu.Unlock()
+}
+
+func (c *Config) AutoUploadEnabled() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.AutoUpload
+}
+
+func Handler(buf *buffer.CircularBuffer, saveChan <-chan hotkey.SaveRequest, cfg *Config, log *zap.Logger) {
 	log = log.Named("save")
 
 	// Start listening for setting updates
@@ -36,8 +49,8 @@ func Handler(buf *buffer.CircularBuffer, saveChan <-chan hotkey.SaveRequest, cfg
 		go func() {
 			for update := range cfg.UpdateCh {
 				if update.Changed["auto_upload"] {
-					cfg.AutoUpload = update.Settings.AutoUpload
-					log.Info("auto_upload setting changed", zap.Bool("enabled", cfg.AutoUpload))
+					cfg.SetAutoUpload(update.Settings.AutoUpload)
+					log.Info("auto_upload setting changed", zap.Bool("enabled", update.Settings.AutoUpload))
 				}
 			}
 		}()
@@ -53,7 +66,7 @@ func Handler(buf *buffer.CircularBuffer, saveChan <-chan hotkey.SaveRequest, cfg
 	}
 }
 
-func saveClip(buf *buffer.CircularBuffer, seconds int, cfg Config, log *zap.Logger) error {
+func saveClip(buf *buffer.CircularBuffer, seconds int, cfg *Config, log *zap.Logger) error {
 	segDur := capture.SegmentDuration
 	if segDur <= 0 {
 		segDur = 1
@@ -113,7 +126,7 @@ func saveClip(buf *buffer.CircularBuffer, seconds int, cfg Config, log *zap.Logg
 		)
 
 		// Auto-upload to FrostClip if enabled — runs in background, doesn't block local save
-		if cfg.AutoUpload {
+		if cfg.AutoUploadEnabled() {
 			go func() {
 				ud, err := userdata.Load()
 				if err != nil || !ud.LoggedIn() {
@@ -121,17 +134,18 @@ func saveClip(buf *buffer.CircularBuffer, seconds int, cfg Config, log *zap.Logg
 					notify.Send("FrostClip", "Log in to FrostClip to enable auto-upload.")
 					return
 				}
-				clipURL, err := upload.ClipToAPI(outputPath, ud.AccessToken, log)
+				clipURL, copied, err := upload.ClipToAPIAndCopy(outputPath, ud.AccessToken, log)
 				if err != nil {
 					log.Warn("upload to FrostClip failed", zap.Error(err))
 					notify.Send("FrostClip Upload Failed", "Could not upload clip — check your connection.")
 					return
 				}
-				if err := clipboard.Write(clipURL); err != nil {
-					log.Warn("failed to copy clip URL to clipboard", zap.Error(err))
+				log.Info("clip uploaded", zap.String("url", clipURL), zap.Bool("copied", copied))
+				if copied {
+					notify.Send("FrostClip — Link Copied!", clipURL)
+				} else {
+					notify.Send("FrostClip Uploaded", clipURL)
 				}
-				log.Info("clip uploaded and link copied", zap.String("url", clipURL))
-				notify.Send("FrostClip — Link Copied!", clipURL)
 			}()
 		}
 

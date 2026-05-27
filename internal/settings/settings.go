@@ -57,7 +57,7 @@ type Settings struct {
 	Bitrate        string      `json:"bitrate"`
 	Audio          string      `json:"audio"`
 	SegmentTempDir string      `json:"segment_temp_dir"`
-	AutoUpload     bool        `json:"auto_upload"` // auto-upload clips to FrostClip and copy link
+	AutoUpload     bool        `json:"auto_upload"`  // auto-upload clips to FrostClip and copy link
 	VolumeMixer    VolumeMixer `json:"volume_mixer"` // per-app volume control
 
 	FPS       int       `json:"-"`
@@ -431,4 +431,3 @@ func (w *Watcher) Stop() {
 	close(w.stopCh)
 	<-w.done
 }
-

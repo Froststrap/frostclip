@@ -427,6 +427,46 @@ func waylandLoop(buf *buffer.CircularBuffer, cfg Config, log *zap.Logger) {
 		if err != nil {
 			consecErr++
 			log.Warn("wayland capture error — retrying in 1s", zap.Error(err), zap.Int("consecutive", consecErr))
+
+			// If compositor reports invalid buffer or the wayland connection is closed abruptly,
+			// attempt wf-recorder fallback immediately as a last resort for broken compositors.
+			errStr := err.Error()
+			if strings.Contains(errStr, "invalid buffer") || strings.Contains(errStr, "unable to read message header") {
+				wfPath, wfErr := exec.LookPath("wf-recorder")
+				if wfErr != nil {
+					notify.Send("FrostClip: Wayland fallback missing", "wf-recorder not found. Install wf-recorder for automatic Wayland fallback.")
+					log.Warn("wf-recorder not found; cannot fallback")
+				} else {
+					log.Info("attempting wf-recorder fallback due to compositor error", zap.String("wf-recorder", wfPath))
+					if fbErr := runWfFallback(buf, cfg, log); fbErr != nil {
+						log.Warn("wf-recorder fallback failed", zap.Error(fbErr))
+					} else {
+						log.Info("wf-recorder fallback finished; resuming main capture")
+					}
+				}
+				consecErr = 0
+				time.Sleep(time.Second)
+				continue
+			}
+
+			// Otherwise, fall back to wf-recorder after repeated failures
+			if consecErr >= 3 {
+				wfPath, wfErr := exec.LookPath("wf-recorder")
+				if wfErr != nil {
+					// notify user once
+					notify.Send("FrostClip: Wayland fallback missing", "wf-recorder not found. Install wf-recorder for automatic Wayland fallback.")
+					log.Warn("wf-recorder not found; cannot fallback")
+				} else {
+					log.Info("attempting wf-recorder fallback", zap.String("wf-recorder", wfPath))
+					if fbErr := runWfFallback(buf, cfg, log); fbErr != nil {
+						log.Warn("wf-recorder fallback failed", zap.Error(fbErr))
+					} else {
+						log.Info("wf-recorder fallback finished; resuming main capture")
+					}
+				}
+				consecErr = 0
+			}
+
 			time.Sleep(time.Second)
 			continue
 		}
@@ -1025,6 +1065,22 @@ func runWlrScreencopyCapture(display *wl.Display, shm *wl.Shm, output *wl.Output
 	nextFrame := time.Now()
 	slot := 0
 
+	// wlBufs holds the two pre-allocated wl_buffer objects (one per slot).
+	// They are created once after the first frame metadata is received and
+	// reused for every subsequent frame. Destroying and recreating a wl_buffer
+	// at the same shm offset each frame causes some compositors (niri, Hyprland)
+	// to raise a protocol error (invalid buffer, code 1) and close the connection,
+	// because they may hold an internal reference to the buffer object between frames.
+	var wlBufs [2]*wl.Buffer
+
+	defer func() {
+		for _, b := range wlBufs {
+			if b != nil {
+				b.Destroy()
+			}
+		}
+	}()
+
 	// Phase 2: capture loop. Initialize shm/ffmpeg on first frame metadata.
 	for {
 		offset := slot * frameSize
@@ -1122,6 +1178,21 @@ func runWlrScreencopyCapture(display *wl.Display, shm *wl.Shm, output *wl.Output
 				frame.Destroy()
 				return fmt.Errorf("create shm pool: %w", allocErr)
 			}
+
+			// Pre-allocate both slot buffers once. Reusing the same wl_buffer
+			// objects across frames avoids the "invalid buffer" protocol error
+			// that occurs when compositors retain internal references between frames.
+			for i := 0; i < 2; i++ {
+				wlBufs[i], allocErr = pool.CreateBuffer(
+					int32(i*frameSize), int32(width), int32(height),
+					int32(stride), shmFormat,
+				)
+				if allocErr != nil {
+					frame.Destroy()
+					return fmt.Errorf("create wl_buffer slot %d: %w", i, allocErr)
+				}
+			}
+
 			log.Info("wayland screencopy starting", zap.Uint32("width", width), zap.Uint32("height", height))
 			if err := startFFmpeg(); err != nil {
 				frame.Destroy()
@@ -1136,15 +1207,8 @@ func runWlrScreencopyCapture(display *wl.Display, shm *wl.Shm, output *wl.Output
 			)
 		}
 
-		wlBuf, err := pool.CreateBuffer(
-			int32(offset), int32(frameW), int32(frameH),
-			int32(frameStride),
-			frameFormat,
-		)
-		if err != nil {
-			frame.Destroy()
-			return fmt.Errorf("create wl_buffer: %w", err)
-		}
+		// Reuse the pre-allocated buffer for this slot.
+		wlBuf := wlBufs[slot]
 
 		// Per-frame sync channels
 		bufferDone := make(chan error, 1)
@@ -1166,34 +1230,31 @@ func runWlrScreencopyCapture(display *wl.Display, shm *wl.Shm, output *wl.Output
 		}
 		if copyErr != nil {
 			frame.Destroy()
-			wlBuf.Destroy()
 			return fmt.Errorf("copy frame: %w", copyErr)
 		}
 		frameErr := dispatchUntilDone(display, done, 3*time.Second)
 		if frameErr != nil {
-			// try to drain bufferDone if present to avoid leaking
 			frame.Destroy()
-			wlBuf.Destroy()
 			return frameErr
 		}
 
-		// For mgrVersion >=3, compositor will send buffer_done when finished; wait for it before destroying wlBuf
+		// For mgrVersion >=3, compositor will send buffer_done when finished;
+		// wait for it before reading the shm data.
 		if mgrVersion >= 3 {
 			if err := dispatchUntilDone(display, bufferDone, 3*time.Second); err != nil {
 				frame.Destroy()
-				wlBuf.Destroy()
 				return fmt.Errorf("wait buffer_done: %w", err)
 			}
 		}
 
-		// At this point compositor finished with buffer, safe to read and destroy
+		// Compositor is done with the buffer; safe to read.
 		frameSlice := shmData[offset : offset+frameSize]
 		if err := writeAll(stdin, frameSlice); err != nil {
 			return fmt.Errorf("write to ffmpeg: %w", err)
 		}
 
 		frame.Destroy()
-		wlBuf.Destroy()
+		// wlBuf is NOT destroyed here — it is reused next time this slot is active.
 
 		slot = (slot + 1) % 2
 		nextFrame = nextFrame.Add(frameInterval)
