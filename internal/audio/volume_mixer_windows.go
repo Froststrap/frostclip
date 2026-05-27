@@ -3,8 +3,6 @@
 package audio
 
 import (
-	"fmt"
-
 	"go.uber.org/zap"
 )
 
