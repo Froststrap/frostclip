@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -233,25 +234,40 @@ func main() {
 	updateCh := watcher.Watch()
 	defer watcher.Stop()
 
-	ffmpegBin, err := setup.EnsureFFmpeg(log)
-	if err != nil {
-		log.Fatal("could not set up FFmpeg", zap.Error(err))
-	}
-	if ffmpegBin == "" {
-		log.Fatal("FFmpeg not found — install it and restart FrostClip")
-	}
+	// --- Platform-specific setup ---
+	var ffmpegBin string
+	var audioCfg setup.AudioConfig
+	var fallbackAudio string
 
-	audioCfg := setup.ResolveAudio(ffmpegBin, cfg.AudioMode, log)
-	fallbackAudio := ""
-	if cfg.AudioMode != settings.AudioOff {
-		if path, err := audio.EnsureSilenceFile(); err != nil {
-			log.Warn("could not prepare bundled silence audio", zap.Error(err))
-		} else {
-			fallbackAudio = path
+	if runtime.GOOS == "linux" {
+		// Linux: use gpu-screen-recorder
+		if err := setup.EnsureRecorder(log); err != nil {
+			log.Fatal("could not set up GPU screen recorder", zap.Error(err))
+		}
+		// On Linux we don't need FFmpeg or audio resolution from setup
+		ffmpegBin = ""
+		audioCfg = setup.AudioConfig{} // empty, capture_linux.go handles audio detection
+		fallbackAudio = ""
+	} else {
+		// Windows/macOS: use FFmpeg
+		ffmpegBin, err = setup.EnsureFFmpeg(log)
+		if err != nil {
+			log.Fatal("could not set up FFmpeg", zap.Error(err))
+		}
+		if ffmpegBin == "" {
+			log.Fatal("FFmpeg not found — install it and restart FrostClip")
+		}
+		audioCfg = setup.ResolveAudio(ffmpegBin, cfg.AudioMode, log)
+		if cfg.AudioMode != settings.AudioOff {
+			if path, err := audio.EnsureSilenceFile(); err != nil {
+				log.Warn("could not prepare bundled silence audio", zap.Error(err))
+			} else {
+				fallbackAudio = path
+			}
 		}
 	}
 
-	// Initialize volume mixer
+	// Initialize volume mixer (cross-platform)
 	volumeMixer := audio.NewVolumeMixer(cfg.VolumeMixer, log)
 	defer volumeMixer.Close()
 	if err := volumeMixer.ApplyMix(); err != nil {
@@ -266,11 +282,13 @@ func main() {
 	log.Info("FrostClip is running!")
 	log.Info("hotkeys: F6=10s  F7=15s  F8=30s  F9=60s  Ctrl+C=quit")
 
+	// Create circular buffer (used only on Windows/macOS; on Linux it's unused)
 	buf, err := buffer.NewWithBaseDir(120, cfg.SegmentTempDir)
 	if err != nil {
 		log.Fatal("could not create segment buffer", zap.Error(err))
 	}
 	log.Info("segment storage initialized", zap.String("temp_dir", buf.TempDir()))
+
 	saveChan := make(chan hotkey.SaveRequest, 10)
 
 	capCfg := capture.Config{
@@ -283,6 +301,7 @@ func main() {
 		Resolution:     cfg.Resolution,
 		Bitrate:        cfg.Bitrate,
 		UpdateCh:       updateCh,
+		AudioMode:      cfg.AudioMode,
 	}
 	go capture.Loop(buf, capCfg, log)
 	go hotkey.Listen(saveChan, log)
@@ -318,8 +337,16 @@ func main() {
 	tray.Run(saveChan, log, iconData)
 
 	log.Info("shutting down FrostClip...")
-	capture.Kill()
-	log.Info("FFmpeg process terminated")
+	if runtime.GOOS == "linux" {
+		capture.KillRecorder()
+	} else {
+		capture.Kill()
+	}
+	if ffmpegBin != "" {
+		log.Info("FFmpeg process terminated")
+	} else {
+		log.Info("recorder process terminated")
+	}
 	buf.Cleanup()
 	log.Info("goodbye")
 }

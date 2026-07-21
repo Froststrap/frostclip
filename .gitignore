@@ -12,3 +12,6 @@ data.json
 
 ffmpeg/
 logs/
+
+
+rust/target/

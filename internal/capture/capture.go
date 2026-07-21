@@ -18,6 +18,7 @@ type Config struct {
 	Framerate      int
 	Resolution     string
 	Bitrate        string
+	AudioMode      settings.AudioMode
 	UpdateCh       <-chan settings.SettingsUpdate
 }
 

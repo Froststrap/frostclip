@@ -66,7 +66,57 @@ func Handler(buf *buffer.CircularBuffer, saveChan <-chan hotkey.SaveRequest, cfg
 	}
 }
 
+// saveClip handles clip saving based on platform.
+// Linux: uses gpu-screen-recorder (direct MP4 output)
+// Windows/macOS: uses FFmpeg segment concat (legacy)
 func saveClip(buf *buffer.CircularBuffer, seconds int, cfg *Config, log *zap.Logger) error {
+	// Linux: use GPU Screen Recorder
+	if runtime.GOOS == "linux" {
+		return saveClipLinux(seconds, cfg, log)
+	}
+
+	// Windows/macOS: use legacy segment-based approach
+	return saveClipLegacy(buf, seconds, cfg, log)
+}
+
+// saveClipLinux uses gpu-screen-recorder to save a clip.
+func saveClipLinux(seconds int, cfg *Config, log *zap.Logger) error {
+	// Trigger the recorder to save the clip
+	path, err := capture.SaveClip()
+	if err != nil {
+		return fmt.Errorf("recorder save failed: %w", err)
+	}
+
+	// Rename the file to include timestamp and duration
+	timestamp := time.Now().Format("2006-01-02_15-04-05")
+	newPath := filepath.Join(cfg.OutputDir, fmt.Sprintf("clip_%ds_%s.mp4", seconds, timestamp))
+	if err := os.Rename(path, newPath); err != nil {
+		// If rename fails (e.g., cross-device), copy and delete
+		log.Warn("rename failed, falling back to copy+delete", zap.Error(err))
+		if err := copyFile(path, newPath); err != nil {
+			return fmt.Errorf("failed to move clip: %w", err)
+		}
+		_ = os.Remove(path)
+	}
+
+	log.Info("clip saved!", zap.String("path", newPath))
+	notify.SendWithAction(
+		"Clip Saved",
+		fmt.Sprintf("Saved the last %d seconds.", seconds),
+		"Folder",
+		newPath,
+	)
+
+	// Auto-upload
+	if cfg.AutoUploadEnabled() {
+		doAutoUpload(newPath, log)
+	}
+
+	return nil
+}
+
+// saveClipLegacy uses FFmpeg to concatenate TS segments (Windows/macOS).
+func saveClipLegacy(buf *buffer.CircularBuffer, seconds int, cfg *Config, log *zap.Logger) error {
 	segDur := capture.SegmentDuration
 	if segDur <= 0 {
 		segDur = 1
@@ -125,28 +175,9 @@ func saveClip(buf *buffer.CircularBuffer, seconds int, cfg *Config, log *zap.Log
 			outputPath,
 		)
 
-		// Auto-upload to FrostClip if enabled — runs in background, doesn't block local save
+		// Auto-upload
 		if cfg.AutoUploadEnabled() {
-			go func() {
-				ud, err := userdata.Load()
-				if err != nil || !ud.LoggedIn() {
-					log.Warn("auto_upload enabled but not logged in — skipping upload")
-					notify.Send("FrostClip", "Log in to FrostClip to enable auto-upload.")
-					return
-				}
-				clipURL, copied, err := upload.ClipToAPIAndCopy(outputPath, ud.AccessToken, log)
-				if err != nil {
-					log.Warn("upload to FrostClip failed", zap.Error(err))
-					notify.Send("FrostClip Upload Failed", "Could not upload clip — check your connection.")
-					return
-				}
-				log.Info("clip uploaded", zap.String("url", clipURL), zap.Bool("copied", copied))
-				if copied {
-					notify.Send("FrostClip — Link Copied!", clipURL)
-				} else {
-					notify.Send("FrostClip Uploaded", clipURL)
-				}
-			}()
+			doAutoUpload(outputPath, log)
 		}
 
 		return nil
@@ -155,6 +186,46 @@ func saveClip(buf *buffer.CircularBuffer, seconds int, cfg *Config, log *zap.Log
 		return lastErr
 	}
 	return fmt.Errorf("no save strategies available")
+}
+
+// doAutoUpload handles the upload logic (shared between Linux and legacy).
+func doAutoUpload(clipPath string, log *zap.Logger) {
+	ud, err := userdata.Load()
+	if err != nil || !ud.LoggedIn() {
+		log.Warn("auto_upload enabled but not logged in — skipping upload")
+		notify.Send("FrostClip", "Log in to FrostClip to enable auto-upload.")
+		return
+	}
+	clipURL, copied, err := upload.ClipToAPIAndCopy(clipPath, ud.AccessToken, log)
+	if err != nil {
+		log.Warn("upload to FrostClip failed", zap.Error(err))
+		notify.Send("FrostClip Upload Failed", "Could not upload clip — check your connection.")
+		return
+	}
+	log.Info("clip uploaded", zap.String("url", clipURL), zap.Bool("copied", copied))
+	if copied {
+		notify.Send("FrostClip — Link Copied!", clipURL)
+	} else {
+		notify.Send("FrostClip Uploaded", clipURL)
+	}
+}
+
+// copyFile copies a file from src to dst (fallback when rename fails).
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	_, err = out.ReadFrom(in)
+	return err
 }
 
 type saveStrategy struct {
