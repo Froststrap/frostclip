@@ -6,7 +6,9 @@ pub struct AudioCapture {
 
 impl AudioCapture {
     pub fn new(mode: &str) -> Self {
-        Self { mode: mode.to_string() }
+        Self {
+            mode: mode.to_string(),
+        }
     }
 
     pub fn capture(&mut self) -> Result<()> {
