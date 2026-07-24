@@ -1,4 +1,4 @@
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VideoFormat {
     Unknown,
     Bgra,
@@ -7,6 +7,7 @@ pub enum VideoFormat {
     Yuyv,
 }
 
+#[derive(Debug)]
 pub enum VideoFrame {
     LinuxDmaBuf(DmaBufFrame),
 
@@ -15,9 +16,12 @@ pub enum VideoFrame {
         width: u32,
         height: u32,
         stride: u32,
+        format: VideoFormat,
+        timestamp: u64,
     },
 }
 
+#[derive(Debug)]
 pub struct DmaBufFrame {
     pub fd: i32,
     pub width: u32,

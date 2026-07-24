@@ -1,7 +1,7 @@
 use anyhow::{Result, anyhow};
 
 use crate::{
-    encoder::{EncodedPacket, Encoder},
+    encoder::{EncodedPacket, Encoder, VideoInfo},
     frame::VideoFrame,
 };
 
@@ -17,16 +17,9 @@ impl Encoder for NvencEncoder {
     fn submit(&mut self, frame: VideoFrame) -> Result<Vec<EncodedPacket>> {
         match frame {
             VideoFrame::LinuxDmaBuf(dmabuf) => {
-                /*
-                    - Create CUDA context
-                    - Import dma-buf:
-                    - cuImportExternalMemory()
-                    - Map CUDA array
-                    - Register NVENC resource
-                    - nvEncEncodePicture()
-                */
+                // TODO: actually implement nvenc support
 
-                todo!("NVENC dma-buf path")
+                todo!("NVENC support not yet implemented")
             }
 
             _ => Err(anyhow!("NVENC only supports DMA-BUF frames")),
@@ -35,5 +28,9 @@ impl Encoder for NvencEncoder {
 
     fn flush(&mut self) -> Result<Vec<EncodedPacket>> {
         Ok(Vec::new())
+    }
+
+    fn video_info(&self) -> Option<VideoInfo> {
+        None
     }
 }

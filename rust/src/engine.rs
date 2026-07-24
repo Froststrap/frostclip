@@ -6,7 +6,10 @@ use log::{debug, error, info};
 use crate::buffer::ReplayBuffer;
 use crate::capture::Capture;
 use crate::config::Config;
-use crate::encoder::{Encoder, vaapi::VaapiEncoder};
+use crate::encoder::{
+    Encoder,
+    factory::{EncoderConfig, create_encoder},
+};
 use crate::frame::VideoFrame;
 
 pub struct CaptureEngine {
@@ -26,12 +29,22 @@ impl CaptureEngine {
         info!("ENGINE: output directory {:?}", config.output_dir);
 
         let capture = Capture::new()?;
+        let capture_info = capture.info();
 
         info!("ENGINE: capture backend created");
+        info!(
+            "ENGINE: capture resolution {}x{}",
+            capture_info.width, capture_info.height
+        );
 
-        let encoder: Box<dyn Encoder> = Box::new(VaapiEncoder::new()?);
+        let encoder = create_encoder(EncoderConfig {
+            input_width: capture_info.width,
+            input_height: capture_info.height,
 
-        info!("ENGINE: VAAPI encoder created");
+            output_width: config.width,
+            output_height: config.height,
+        })?;
+        info!("ENGINE: encoder created");
 
         let buffer = ReplayBuffer::new(
             config.framerate as usize,
@@ -144,19 +157,23 @@ impl CaptureEngine {
             .unwrap()
             .get_last_seconds(seconds, self.config.framerate as usize);
 
-        info!("ENGINE: packets selected={}", packets.len());
-
         if packets.is_empty() {
-            error!("ENGINE: replay buffer empty");
-
             anyhow::bail!("Replay buffer is empty");
         }
 
-        let filename = format!("clip_{}.mp4", chrono::Utc::now().timestamp());
+        let filename = format!("clip_{}.h264", chrono::Utc::now().timestamp());
 
         let path = self.config.output_dir.join(filename);
 
-        info!("ENGINE: clip path {:?}", path);
+        let mut file = std::fs::File::create(&path)?;
+
+        use std::io::Write;
+
+        for packet in packets {
+            file.write_all(&packet.data)?;
+        }
+
+        info!("ENGINE: wrote {:?}", path);
 
         Ok(path.to_string_lossy().to_string())
     }

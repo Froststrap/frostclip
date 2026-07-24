@@ -8,10 +8,18 @@ pub mod linux;
 #[cfg(target_os = "linux")]
 use linux::LinuxCapture;
 
+#[derive(Debug, Clone)]
+pub struct CaptureInfo {
+    pub width: u32,
+    pub height: u32,
+}
+
 pub trait CaptureBackend {
     fn start(&mut self, callback: Box<dyn Fn(VideoFrame) + Send + Sync>) -> Result<()>;
 
     fn stop(&mut self) -> Result<()>;
+
+    fn info(&self) -> CaptureInfo;
 }
 
 pub struct Capture {
@@ -39,5 +47,9 @@ impl Capture {
 
     pub fn stop(&mut self) -> Result<()> {
         self.backend.stop()
+    }
+
+    pub fn info(&self) -> CaptureInfo {
+        self.backend.info()
     }
 }
