@@ -190,7 +190,31 @@ impl Encoder for VaapiEncoder {
     }
 
     fn flush(&mut self) -> Result<Vec<EncodedPacket>> {
-        Ok(Vec::new())
+        let mut packets = Vec::new();
+
+        self.encoder.send_eof()?;
+
+        loop {
+            let mut packet = ffmpeg::Packet::empty();
+
+            match self.encoder.receive_packet(&mut packet) {
+                Ok(_) => {
+                    packets.push(EncodedPacket {
+                        data: packet.data().unwrap_or(&[]).to_vec(),
+                        timestamp: packet.pts().unwrap_or(0) as u64,
+                        is_keyframe: packet.is_key(),
+                    });
+                }
+
+                Err(_) => {
+                    break;
+                }
+            }
+        }
+
+        info!("VAAPI flush complete packets={}", packets.len());
+
+        Ok(packets)
     }
 
     fn video_info(&self) -> Option<VideoInfo> {
@@ -202,6 +226,8 @@ impl Encoder for VaapiEncoder {
             time_base_den: 60,
 
             extradata: Vec::new(),
+            codec: ffmpeg::codec::Id::H264,
+            format: ffmpeg::format::Pixel::YUV420P,
         })
     }
 }

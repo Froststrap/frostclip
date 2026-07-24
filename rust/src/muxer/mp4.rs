@@ -5,6 +5,7 @@ use crate::encoder::{EncodedPacket, VideoInfo};
 
 pub struct Mp4Muxer {
     output: ffmpeg::format::context::Output,
+
     stream_index: usize,
 }
 
@@ -13,17 +14,21 @@ impl Mp4Muxer {
         ffmpeg::init()?;
 
         let mut output = ffmpeg::format::output(path)?;
-
-        let codec = ffmpeg::encoder::find_by_name("libx264").unwrap();
-
-        let mut stream = output.add_stream(codec)?;
+        let mut stream = output.add_stream(info.codec)?;
 
         {
             let mut params = stream.parameters();
 
+            params.set_codec(info.codec);
+
             params.set_width(info.width);
+
             params.set_height(info.height);
-            params.set_format(ffmpeg::format::Pixel::YUV420P);
+
+            params.set_format(info.format);
+            if !info.extradata.is_empty() {
+                params.set_extradata(&info.extradata);
+            }
         }
 
         stream.set_time_base(ffmpeg::Rational::new(
@@ -45,6 +50,7 @@ impl Mp4Muxer {
         pkt.set_stream(self.stream_index);
 
         pkt.set_pts(Some(packet.timestamp as i64));
+
         pkt.set_dts(Some(packet.timestamp as i64));
 
         if packet.is_keyframe {
@@ -58,6 +64,7 @@ impl Mp4Muxer {
 
     pub fn finish(mut self) -> Result<()> {
         self.output.write_trailer()?;
+
         Ok(())
     }
 }

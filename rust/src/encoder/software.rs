@@ -166,7 +166,10 @@ impl Encoder for SoftwareEncoder {
             height: self.output_height,
             time_base_num: 1,
             time_base_den: 60,
+
             extradata: Vec::new(),
+            codec: ffmpeg::codec::Id::H264,
+            format: ffmpeg::format::Pixel::YUV420P,
         })
     }
 }

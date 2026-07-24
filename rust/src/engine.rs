@@ -117,6 +117,8 @@ impl CaptureEngine {
 
         self.capture.stop()?;
 
+        std::thread::sleep(std::time::Duration::from_millis(500));
+
         self.running = false;
 
         info!("ENGINE: capture stopped");
