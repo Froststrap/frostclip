@@ -5,7 +5,7 @@ use ffmpeg_sys_next::{av_buffer_ref, av_hwframe_get_buffer, av_hwframe_transfer_
 use log::{info, warn};
 
 use crate::encoder::vaapi_hw::VaapiHardware;
-use crate::encoder::{EncodedPacket, Encoder, VideoInfo};
+use crate::encoder::{EncodedPacket, Encoder, VideoInfo, extract_codec_parameters};
 use crate::frame::{VideoFormat, VideoFrame};
 
 pub struct SendScaler(pub ffmpeg::software::scaling::Context);
@@ -218,6 +218,10 @@ impl Encoder for VaapiEncoder {
     }
 
     fn video_info(&self) -> Option<VideoInfo> {
+        let extradata =
+            unsafe { extract_codec_parameters(self.encoder.as_ptr()).unwrap_or_default() };
+
+        info!("H264 extradata size={}", extradata.len());
         Some(VideoInfo {
             width: self.width,
             height: self.height,
@@ -225,7 +229,8 @@ impl Encoder for VaapiEncoder {
             time_base_num: 1,
             time_base_den: 60,
 
-            extradata: Vec::new(),
+            extradata,
+
             codec: ffmpeg::codec::Id::H264,
             format: ffmpeg::format::Pixel::YUV420P,
         })

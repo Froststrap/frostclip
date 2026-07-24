@@ -10,6 +10,7 @@ pub mod config;
 pub mod encoder;
 pub mod engine;
 pub mod frame;
+pub mod muxer;
 
 use engine::CaptureEngine;
 

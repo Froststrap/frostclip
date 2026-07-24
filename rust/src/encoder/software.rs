@@ -1,8 +1,9 @@
 use anyhow::{Result, anyhow};
 use ffmpeg_next as ffmpeg;
+use log::info;
 
 use crate::{
-    encoder::{EncodedPacket, Encoder, VideoInfo},
+    encoder::{EncodedPacket, Encoder, VideoInfo, extract_codec_parameters},
     frame::VideoFrame,
 };
 
@@ -161,13 +162,20 @@ impl Encoder for SoftwareEncoder {
     }
 
     fn video_info(&self) -> Option<VideoInfo> {
+        let extradata =
+            unsafe { extract_codec_parameters(self.encoder.as_ptr()).unwrap_or_default() };
+
+        info!("H264 extradata size={}", extradata.len());
+
         Some(VideoInfo {
             width: self.output_width,
             height: self.output_height,
+
             time_base_num: 1,
             time_base_den: 60,
 
-            extradata: Vec::new(),
+            extradata,
+
             codec: ffmpeg::codec::Id::H264,
             format: ffmpeg::format::Pixel::YUV420P,
         })

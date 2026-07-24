@@ -11,6 +11,7 @@ use crate::encoder::{
     factory::{EncoderConfig, create_encoder},
 };
 use crate::frame::VideoFrame;
+use crate::muxer::MuxerFactory;
 
 pub struct CaptureEngine {
     capture: Capture,
@@ -163,17 +164,31 @@ impl CaptureEngine {
             anyhow::bail!("Replay buffer is empty");
         }
 
-        let filename = format!("clip_{}.h264", chrono::Utc::now().timestamp());
+        let muxer_factory = crate::muxer::Mp4MuxerFactory;
+
+        let filename = format!(
+            "clip_{}.{}",
+            chrono::Utc::now().timestamp(),
+            muxer_factory.extension()
+        );
 
         let path = self.config.output_dir.join(filename);
 
-        let mut file = std::fs::File::create(&path)?;
+        let encoder = self.encoder.lock().unwrap();
 
-        use std::io::Write;
+        let info = encoder
+            .video_info()
+            .ok_or_else(|| anyhow::anyhow!("Missing video info"))?;
+
+        drop(encoder);
+
+        let mut muxer = muxer_factory.create(path.to_str().unwrap(), &info)?;
 
         for packet in packets {
-            file.write_all(&packet.data)?;
+            muxer.write(&packet)?;
         }
+
+        muxer.finish()?;
 
         info!("ENGINE: wrote {:?}", path);
 

@@ -1,11 +1,12 @@
 use anyhow::Result;
 use ffmpeg_next as ffmpeg;
+use ffmpeg_sys_next as ffi;
 
 use crate::encoder::{EncodedPacket, VideoInfo};
+use crate::muxer::Muxer;
 
 pub struct Mp4Muxer {
     output: ffmpeg::format::context::Output,
-
     stream_index: usize,
 }
 
@@ -14,43 +15,64 @@ impl Mp4Muxer {
         ffmpeg::init()?;
 
         let mut output = ffmpeg::format::output(path)?;
-        let mut stream = output.add_stream(info.codec)?;
+
+        let stream_index;
 
         {
-            let mut params = stream.parameters();
+            let mut stream = output.add_stream(ffmpeg::codec::Id::H264)?;
 
-            params.set_codec(info.codec);
+            stream.set_time_base(ffmpeg::Rational::new(
+                info.time_base_num,
+                info.time_base_den,
+            ));
 
-            params.set_width(info.width);
+            unsafe {
+                let params = stream.parameters().as_mut_ptr();
 
-            params.set_height(info.height);
+                (*params).codec_type = ffi::AVMediaType::AVMEDIA_TYPE_VIDEO;
+                (*params).codec_id = ffi::AVCodecID::AV_CODEC_ID_H264;
 
-            params.set_format(info.format);
-            if !info.extradata.is_empty() {
-                params.set_extradata(&info.extradata);
+                (*params).width = info.width as i32;
+                (*params).height = info.height as i32;
+
+                (*params).format = ffmpeg::format::Pixel::YUV420P as i32;
+
+                if !info.extradata.is_empty() {
+                    let size = info.extradata.len();
+
+                    let data = ffi::av_malloc(size + ffi::AV_INPUT_BUFFER_PADDING_SIZE as usize)
+                        as *mut u8;
+
+                    if data.is_null() {
+                        anyhow::bail!("failed allocating codec extradata");
+                    }
+
+                    std::ptr::copy_nonoverlapping(info.extradata.as_ptr(), data, size);
+
+                    (*params).extradata = data;
+                    (*params).extradata_size = size as i32;
+                }
             }
-        }
 
-        stream.set_time_base(ffmpeg::Rational::new(
-            info.time_base_num,
-            info.time_base_den,
-        ));
+            stream_index = stream.index();
+        }
 
         output.write_header()?;
 
         Ok(Self {
             output,
-            stream_index: stream.index(),
+            stream_index,
         })
     }
+}
 
-    pub fn write(&mut self, packet: &EncodedPacket) -> Result<()> {
+impl Muxer for Mp4Muxer {
+    fn write(&mut self, packet: &EncodedPacket) -> Result<()> {
         let mut pkt = ffmpeg::Packet::copy(&packet.data);
 
         pkt.set_stream(self.stream_index);
 
         pkt.set_pts(Some(packet.timestamp as i64));
-
         pkt.set_dts(Some(packet.timestamp as i64));
 
         if packet.is_keyframe {
@@ -62,7 +84,7 @@ impl Mp4Muxer {
         Ok(())
     }
 
-    pub fn finish(mut self) -> Result<()> {
+    fn finish(mut self: Box<Self>) -> Result<()> {
         self.output.write_trailer()?;
 
         Ok(())
