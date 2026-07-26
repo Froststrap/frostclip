@@ -11,6 +11,8 @@ CaptureContext* capture_init(
     uint32_t width,
     uint32_t height,
     uint32_t bitrate_kbps,
+    uint32_t replay_buffer_seconds,
+    uint32_t default_clip_seconds,
     const char* output_dir,
     const char* audio_mode
 );

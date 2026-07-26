@@ -45,18 +45,20 @@ impl CaptureEngine {
             output_width: config.width,
             output_height: config.height,
         })?;
+
         info!("ENGINE: encoder created");
 
         let buffer = ReplayBuffer::new(
             config.framerate as usize,
-            30,
+            config.replay_buffer_seconds as usize,
             config.width as usize,
             config.height as usize,
         );
 
         info!(
-            "ENGINE: replay buffer created max_frames={}",
-            config.framerate * 30
+            "ENGINE: replay buffer created duration={}s max_frames={}",
+            config.replay_buffer_seconds,
+            config.framerate * config.replay_buffer_seconds
         );
 
         Ok(Self {
@@ -72,7 +74,6 @@ impl CaptureEngine {
         info!("ENGINE: start requested");
 
         let encoder = Arc::clone(&self.encoder);
-
         let buffer = Arc::clone(&self.buffer);
 
         self.capture.start(Box::new(move |frame| {
@@ -151,7 +152,11 @@ impl CaptureEngine {
         Ok(())
     }
 
-    pub fn save_clip(&self, seconds: usize) -> Result<String> {
+    pub fn save_clip(&self) -> Result<String> {
+        self.save_clip_with_duration(self.config.default_clip_seconds as usize)
+    }
+
+    pub fn save_clip_with_duration(&self, seconds: usize) -> Result<String> {
         info!("ENGINE: saving clip {} seconds", seconds);
 
         let packets = self

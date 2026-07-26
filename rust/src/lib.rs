@@ -32,6 +32,8 @@ pub extern "C" fn capture_init(
     width: u32,
     height: u32,
     bitrate_kbps: u32,
+    replay_buffer_seconds: u32,
+    default_clip_seconds: u32,
     output_dir: *const c_char,
     _audio_mode: *const c_char,
 ) -> *mut CaptureEngine {
@@ -47,10 +49,26 @@ pub extern "C" fn capture_init(
         }
     };
 
-    let config = Config::new(width, height, framerate, bitrate_kbps, output_dir);
+    let config = match Config::new(
+        width,
+        height,
+        framerate,
+        bitrate_kbps,
+        replay_buffer_seconds,
+        default_clip_seconds,
+        output_dir,
+    ) {
+        Ok(config) => config,
+
+        Err(e) => {
+            set_last_error(e);
+            return std::ptr::null_mut();
+        }
+    };
 
     match CaptureEngine::new(config) {
         Ok(engine) => Box::into_raw(Box::new(engine)),
+
         Err(e) => {
             set_last_error(e);
             std::ptr::null_mut()
