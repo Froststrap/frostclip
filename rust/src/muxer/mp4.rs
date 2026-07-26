@@ -72,8 +72,9 @@ impl Muxer for Mp4Muxer {
 
         pkt.set_stream(self.stream_index);
 
-        pkt.set_pts(Some(packet.timestamp as i64));
-        pkt.set_dts(Some(packet.timestamp as i64));
+        pkt.set_pts(Some(packet.pts));
+        pkt.set_dts(Some(packet.dts));
+        pkt.set_duration(packet.duration);
 
         if packet.is_keyframe {
             pkt.set_flags(ffmpeg::codec::packet::Flags::KEY);

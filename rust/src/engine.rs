@@ -97,10 +97,9 @@ impl CaptureEngine {
 
             for packet in packets {
                 debug!(
-                    "ENGINE: pushing packet timestamp={} keyframe={}",
-                    packet.timestamp, packet.is_keyframe
+                    "ENGINE: pushing packet pts={} dts={} keyframe={}",
+                    packet.pts, packet.dts, packet.is_keyframe
                 );
-
                 buffer.push(packet);
             }
 
@@ -142,7 +141,10 @@ impl CaptureEngine {
         let mut buffer = self.buffer.lock().unwrap();
 
         for packet in packets {
-            debug!("ENGINE: manual packet timestamp={}", packet.timestamp);
+            debug!(
+                "ENGINE: manual packet pts={} dts={}",
+                packet.pts, packet.dts
+            );
 
             buffer.push(packet);
         }

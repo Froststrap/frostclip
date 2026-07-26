@@ -172,7 +172,9 @@ impl Encoder for VaapiEncoder {
                     packets.push(EncodedPacket {
                         data: packet.data().unwrap_or(&[]).to_vec(),
 
-                        timestamp,
+                        pts: packet.pts().unwrap_or(0),
+                        dts: packet.dts().unwrap_or(0),
+                        duration: packet.duration(),
 
                         is_keyframe: packet.is_key(),
                     });
@@ -201,7 +203,11 @@ impl Encoder for VaapiEncoder {
                 Ok(_) => {
                     packets.push(EncodedPacket {
                         data: packet.data().unwrap_or(&[]).to_vec(),
-                        timestamp: packet.pts().unwrap_or(0) as u64,
+
+                        pts: packet.pts().unwrap_or(0),
+                        dts: packet.dts().unwrap_or(0),
+                        duration: packet.duration(),
+
                         is_keyframe: packet.is_key(),
                     });
                 }

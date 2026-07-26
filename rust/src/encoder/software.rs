@@ -149,8 +149,12 @@ impl Encoder for SoftwareEncoder {
         while self.encoder.receive_packet(&mut packet).is_ok() {
             packets.push(EncodedPacket {
                 data: packet.data().unwrap().to_vec(),
+
+                pts: packet.pts().unwrap_or(0),
+                dts: packet.dts().unwrap_or(0),
+                duration: packet.duration(),
+
                 is_keyframe: packet.is_key(),
-                timestamp: self.frame_count,
             });
         }
 
