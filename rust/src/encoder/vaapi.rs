@@ -15,6 +15,7 @@ unsafe impl Send for SendScaler {}
 pub struct VaapiEncoder {
     width: u32,
     height: u32,
+    framerate: u32,
     frame_count: u64,
     encoder: ffmpeg::codec::encoder::video::Encoder,
     scaler: SendScaler,
@@ -38,7 +39,7 @@ impl VaapiEncoder {
         }
     }
 
-    pub fn new(width: u32, height: u32) -> Result<Self> {
+    pub fn new(width: u32, height: u32, framerate: u32) -> Result<Self> {
         ffmpeg::init()?;
 
         let hw = VaapiHardware::new("/dev/dri/renderD128", width, height)?;
@@ -53,8 +54,8 @@ impl VaapiEncoder {
         encoder.set_width(width);
         encoder.set_height(height);
 
-        encoder.set_time_base((1, 60));
-        encoder.set_frame_rate(Some(ffmpeg::Rational::new(60, 1)));
+        encoder.set_time_base((1, framerate as i32));
+        encoder.set_frame_rate(Some(ffmpeg::Rational::new(framerate as i32, 1)));
 
         unsafe {
             (*encoder.as_mut_ptr()).hw_frames_ctx = av_buffer_ref(hw.frames_ctx());
@@ -68,6 +69,13 @@ impl VaapiEncoder {
         options.set("qp", "20");
 
         let encoder = encoder.open_with(options)?;
+        info!(
+            "VAAPI encoder opened: time_base={}/{} framerate={}/{}",
+            encoder.time_base().numerator(),
+            encoder.time_base().denominator(),
+            encoder.frame_rate().numerator(),
+            encoder.frame_rate().denominator()
+        );
 
         let scaler = SendScaler(ffmpeg::software::scaling::Context::get(
             ffmpeg::format::Pixel::BGRA,
@@ -84,6 +92,7 @@ impl VaapiEncoder {
         Ok(Self {
             width,
             height,
+            framerate,
             frame_count: 0,
             encoder,
             scaler,
@@ -146,7 +155,11 @@ impl Encoder for VaapiEncoder {
                 return Err(anyhow!("av_hwframe_transfer_data failed {}", ret));
             }
 
-            (*hw_frame.as_mut_ptr()).pts = timestamp as i64;
+            let pts = (timestamp as f64 / 1_000_000.0 * self.framerate as f64) as i64;
+
+            (*hw_frame.as_mut_ptr()).pts = pts;
+
+            info!("VAAPI timestamp={}us converted_pts={}", timestamp, pts);
         }
 
         info!(
@@ -164,9 +177,14 @@ impl Encoder for VaapiEncoder {
             match self.encoder.receive_packet(&mut packet) {
                 Ok(_) => {
                     info!(
-                        "VAAPI packet size={} keyframe={}",
+                        "VAAPI packet size={} pts={:?} dts={:?} duration={} keyframe={} encoder_timebase={}/{}",
                         packet.size(),
-                        packet.is_key()
+                        packet.pts(),
+                        packet.dts(),
+                        packet.duration(),
+                        packet.is_key(),
+                        self.encoder.time_base().numerator(),
+                        self.encoder.time_base().denominator(),
                     );
 
                     packets.push(EncodedPacket {
@@ -174,7 +192,7 @@ impl Encoder for VaapiEncoder {
 
                         pts: packet.pts().unwrap_or(0),
                         dts: packet.dts().unwrap_or(0),
-                        duration: packet.duration(),
+                        duration: 1,
 
                         is_keyframe: packet.is_key(),
                     });
@@ -228,12 +246,21 @@ impl Encoder for VaapiEncoder {
             unsafe { extract_codec_parameters(self.encoder.as_ptr()).unwrap_or_default() };
 
         info!("H264 extradata size={}", extradata.len());
+
+        let tb = self.encoder.time_base();
+
+        info!(
+            "VIDEO INFO: encoder timebase={}/{}",
+            tb.numerator(),
+            tb.denominator()
+        );
+
         Some(VideoInfo {
             width: self.width,
             height: self.height,
 
-            time_base_num: 1,
-            time_base_den: 60,
+            time_base_num: tb.numerator(),
+            time_base_den: tb.denominator(),
 
             extradata,
 

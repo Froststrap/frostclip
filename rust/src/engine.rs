@@ -44,6 +44,8 @@ impl CaptureEngine {
 
             output_width: config.width,
             output_height: config.height,
+
+            framerate: config.framerate,
         })?;
 
         info!("ENGINE: encoder created");

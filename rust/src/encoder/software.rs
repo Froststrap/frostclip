@@ -13,6 +13,7 @@ unsafe impl Send for SendScaler {}
 
 pub struct SoftwareEncoder {
     frame_count: u64,
+    framerate: u32,
 
     encoder: ffmpeg::codec::encoder::video::Encoder,
 
@@ -31,6 +32,7 @@ impl SoftwareEncoder {
         input_height: u32,
         output_width: u32,
         output_height: u32,
+        framerate: u32,
     ) -> Result<Self> {
         ffmpeg::init()?;
 
@@ -43,8 +45,8 @@ impl SoftwareEncoder {
 
         encoder.set_width(output_width);
         encoder.set_height(output_height);
-        encoder.set_time_base((1, 60));
-        encoder.set_frame_rate(Some(ffmpeg::Rational::new(60, 1)));
+        encoder.set_time_base((1, framerate as i32));
+        encoder.set_frame_rate(Some(ffmpeg::Rational::new(framerate as i32, 1)));
         encoder.set_format(ffmpeg::format::Pixel::YUV420P);
         encoder.set_max_b_frames(0);
 
@@ -71,6 +73,8 @@ impl SoftwareEncoder {
 
         Ok(Self {
             frame_count: 0,
+            framerate,
+
             encoder,
             scaler,
 
@@ -134,7 +138,7 @@ impl Encoder for SoftwareEncoder {
             }
         }
 
-        // Encoder timebase = 1/60
+        // Encoder timebase = 1/framerate
         in_frame.set_pts(Some(self.frame_count as i64));
 
         let mut out_frame = ffmpeg::frame::Video::empty();
@@ -176,7 +180,7 @@ impl Encoder for SoftwareEncoder {
             height: self.output_height,
 
             time_base_num: 1,
-            time_base_den: 60,
+            time_base_den: self.framerate as i32,
 
             extradata,
 

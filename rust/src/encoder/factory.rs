@@ -10,13 +10,15 @@ pub struct EncoderConfig {
 
     pub output_width: u32,
     pub output_height: u32,
+
+    pub framerate: u32,
 }
 
 pub fn create_encoder(config: EncoderConfig) -> Result<Box<dyn Encoder>> {
     if VaapiEncoder::probe() {
         info!("Using VAAPI encoder");
 
-        match VaapiEncoder::new(config.output_width, config.output_height) {
+        match VaapiEncoder::new(config.output_width, config.output_height, config.framerate) {
             Ok(encoder) => {
                 return Ok(Box::new(encoder));
             }
@@ -34,5 +36,6 @@ pub fn create_encoder(config: EncoderConfig) -> Result<Box<dyn Encoder>> {
         config.input_height,
         config.output_width,
         config.output_height,
+        config.framerate,
     )?))
 }

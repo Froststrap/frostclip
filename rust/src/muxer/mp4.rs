@@ -1,6 +1,7 @@
 use anyhow::Result;
 use ffmpeg_next as ffmpeg;
 use ffmpeg_sys_next as ffi;
+use log::info;
 
 use crate::encoder::{EncodedPacket, VideoInfo};
 use crate::muxer::Muxer;
@@ -21,10 +22,21 @@ impl Mp4Muxer {
         {
             let mut stream = output.add_stream(ffmpeg::codec::Id::H264)?;
 
-            stream.set_time_base(ffmpeg::Rational::new(
-                info.time_base_num,
-                info.time_base_den,
-            ));
+            let stream_time_base = ffmpeg::Rational::new(info.time_base_num, info.time_base_den);
+
+            info!(
+                "MUXER: setting stream timebase={}/{}",
+                stream_time_base.numerator(),
+                stream_time_base.denominator()
+            );
+
+            stream.set_time_base(stream_time_base);
+
+            info!(
+                "MUXER: actual stream timebase={}/{}",
+                stream.time_base().numerator(),
+                stream.time_base().denominator()
+            );
 
             unsafe {
                 let params = stream.parameters().as_mut_ptr();
@@ -57,6 +69,17 @@ impl Mp4Muxer {
             stream_index = stream.index();
         }
 
+        info!(
+            "MUXER: writing header stream_index={} timebase={}/{}",
+            stream_index,
+            output.stream(stream_index).unwrap().time_base().numerator(),
+            output
+                .stream(stream_index)
+                .unwrap()
+                .time_base()
+                .denominator()
+        );
+
         output.write_header()?;
 
         Ok(Self {
@@ -72,15 +95,103 @@ impl Muxer for Mp4Muxer {
 
         pkt.set_stream(self.stream_index);
 
-        pkt.set_pts(Some(packet.pts));
-        pkt.set_dts(Some(packet.dts));
-        pkt.set_duration(packet.duration);
+        let stream = self.output.stream(self.stream_index).unwrap();
+
+        let encoder_tb = ffmpeg::Rational::new(1, 60);
+        let muxer_tb = stream.time_base();
+
+        let pts = unsafe {
+            ffi::av_rescale_q(
+                packet.pts,
+                ffi::AVRational {
+                    num: encoder_tb.numerator(),
+                    den: encoder_tb.denominator(),
+                },
+                ffi::AVRational {
+                    num: muxer_tb.numerator(),
+                    den: muxer_tb.denominator(),
+                },
+            )
+        };
+
+        let dts = unsafe {
+            ffi::av_rescale_q(
+                packet.dts,
+                ffi::AVRational {
+                    num: encoder_tb.numerator(),
+                    den: encoder_tb.denominator(),
+                },
+                ffi::AVRational {
+                    num: muxer_tb.numerator(),
+                    den: muxer_tb.denominator(),
+                },
+            )
+        };
+
+        let duration = unsafe {
+            ffi::av_rescale_q(
+                packet.duration,
+                ffi::AVRational {
+                    num: encoder_tb.numerator(),
+                    den: encoder_tb.denominator(),
+                },
+                ffi::AVRational {
+                    num: muxer_tb.numerator(),
+                    den: muxer_tb.denominator(),
+                },
+            )
+        };
+
+        info!(
+            "RESCALE: {} -> {} | pts {}->{} dts {}->{} duration {}->{}",
+            encoder_tb.numerator(),
+            muxer_tb.denominator(),
+            packet.pts,
+            pts,
+            packet.dts,
+            dts,
+            packet.duration,
+            duration
+        );
+
+        pkt.set_pts(Some(pts));
+        pkt.set_dts(Some(dts));
+        pkt.set_duration(duration);
 
         if packet.is_keyframe {
             pkt.set_flags(ffmpeg::codec::packet::Flags::KEY);
         }
 
+        info!(
+            "MUXER WRITE: pts={} dts={} duration={} stream={} stream_tb={}/{}",
+            packet.pts,
+            packet.dts,
+            packet.duration,
+            self.stream_index,
+            self.output
+                .stream(self.stream_index)
+                .unwrap()
+                .time_base()
+                .numerator(),
+            self.output
+                .stream(self.stream_index)
+                .unwrap()
+                .time_base()
+                .denominator()
+        );
+
         pkt.write_interleaved(&mut self.output)?;
+        if packet.is_keyframe {
+            info!(
+                "KEYFRAME DATA: {:02x?}",
+                &packet.data[..std::cmp::min(packet.data.len(), 32)]
+            );
+        }
+
+        info!(
+            "FINAL PACKET: pts={} dts={} duration={} key={}",
+            pts, dts, duration, packet.is_keyframe
+        );
 
         Ok(())
     }
