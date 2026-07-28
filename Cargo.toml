@@ -13,10 +13,18 @@ anyhow = "1.0"
 libc = "0.2"
 log = "0.4"
 env_logger = "0.11"
-chrono = { version = "0.4.45", default-features = false, features = ["std", "clock"] }
+chrono = { version = "0.4.45", default-features = false, features = [
+  "std",
+  "clock",
+] }
 serde_json = "1.0"
 
-tokio = { version = "1.53", default-features = false, features = ["rt-multi-thread", "macros", "sync", "time"] }
+tokio = { version = "1.53", default-features = false, features = [
+  "rt-multi-thread",
+  "macros",
+  "sync",
+  "time",
+] }
 futures = "0.3.33"
 xcap = "0.9.7"
 

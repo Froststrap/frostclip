@@ -26,7 +26,6 @@ fn clear_last_error() {
     *guard = None;
 }
 
-#[unsafe(no_mangle)]
 pub extern "C" fn capture_init(
     framerate: u32,
     width: u32,
@@ -76,8 +75,7 @@ pub extern "C" fn capture_init(
     }
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn capture_start(ctx: *mut CaptureEngine) -> i32 {
+pub fn capture_start(ctx: *mut CaptureEngine) -> i32 {
     if ctx.is_null() {
         set_last_error(anyhow::anyhow!("null context"));
         return -1;
@@ -96,8 +94,7 @@ pub extern "C" fn capture_start(ctx: *mut CaptureEngine) -> i32 {
     }
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn capture_stop(ctx: *mut CaptureEngine) -> i32 {
+pub fn capture_stop(ctx: *mut CaptureEngine) -> i32 {
     if ctx.is_null() {
         set_last_error(anyhow::anyhow!("null context"));
         return -1;
@@ -114,8 +111,7 @@ pub extern "C" fn capture_stop(ctx: *mut CaptureEngine) -> i32 {
     }
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn capture_is_running(ctx: *mut CaptureEngine) -> i32 {
+pub fn capture_is_running(ctx: *mut CaptureEngine) -> i32 {
     if ctx.is_null() {
         return 0;
     }
@@ -125,8 +121,7 @@ pub extern "C" fn capture_is_running(ctx: *mut CaptureEngine) -> i32 {
     if engine.is_running() { 1 } else { 0 }
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn capture_save_clip(ctx: *mut CaptureEngine, _seconds: u32) -> *const c_char {
+pub fn capture_save_clip(ctx: *mut CaptureEngine, _seconds: u32) -> *const c_char {
     if ctx.is_null() {
         set_last_error(anyhow::anyhow!("null context"));
         return std::ptr::null();
@@ -143,8 +138,7 @@ pub extern "C" fn capture_save_clip(ctx: *mut CaptureEngine, _seconds: u32) -> *
     std::ptr::null()
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn capture_save_clip_metadata(
+pub fn capture_save_clip_metadata(
     ctx: *mut CaptureEngine,
     _seconds: u32,
     _game_name: *const c_char,
@@ -164,8 +158,7 @@ pub extern "C" fn capture_save_clip_metadata(
     std::ptr::null()
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn capture_close(ctx: *mut CaptureEngine) {
+pub fn capture_close(ctx: *mut CaptureEngine) {
     if !ctx.is_null() {
         let mut engine = unsafe { Box::from_raw(ctx) };
 
@@ -173,8 +166,7 @@ pub extern "C" fn capture_close(ctx: *mut CaptureEngine) {
     }
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn capture_free_string(ptr: *const c_char) {
+pub fn capture_free_string(ptr: *const c_char) {
     if !ptr.is_null() {
         unsafe {
             let _ = CString::from_raw(ptr as *mut c_char);
@@ -182,8 +174,7 @@ pub extern "C" fn capture_free_string(ptr: *const c_char) {
     }
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn capture_last_error() -> *const c_char {
+pub fn capture_last_error() -> *const c_char {
     let guard = LAST_ERROR.lock().unwrap();
 
     match guard.as_ref() {
