@@ -24,7 +24,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     engine.start()?;
 
     println!("Capturing for {} seconds...", clip_seconds);
-    std::thread::sleep(std::time::Duration::from_secs(5));
+    std::thread::sleep(std::time::Duration::from_secs(clip_seconds as u64));
 
     println!("Saving clip {} seconds...", clip_seconds);
     let clip_path = engine.save_clip()?;
