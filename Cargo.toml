@@ -6,10 +6,6 @@ edition = "2024"
 [lib]
 crate-type = ["cdylib", "rlib"]
 
-[[bin]]
-name = "frostclip"
-path = "src/bin/test.rs"
-
 [dependencies]
 ffmpeg-next = "8.1"
 ffmpeg-sys-next = "8.1"
