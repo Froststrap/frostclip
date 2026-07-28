@@ -1,4 +1,3 @@
-use anyhow::Result;
 use log::{info, warn};
 
 use crate::encoder::{Encoder, software::SoftwareEncoder, vaapi::VaapiEncoder};
@@ -14,7 +13,7 @@ pub struct EncoderConfig {
     pub framerate: u32,
 }
 
-pub fn create_encoder(config: EncoderConfig) -> Result<Box<dyn Encoder>> {
+pub fn create_encoder(config: EncoderConfig) -> Result<Box<dyn Encoder>, ()> {
     if VaapiEncoder::probe() {
         info!("Using VAAPI encoder");
 

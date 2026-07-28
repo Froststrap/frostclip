@@ -1,5 +1,3 @@
-use anyhow::Result;
-
 pub struct AudioCapture {
     mode: String,
 }

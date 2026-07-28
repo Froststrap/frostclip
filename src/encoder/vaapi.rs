@@ -1,4 +1,3 @@
-use anyhow::{Result, anyhow};
 use ffmpeg_next as ffmpeg;
 use ffmpeg_sys_next::{av_buffer_ref, av_hwframe_get_buffer, av_hwframe_transfer_data};
 
@@ -40,17 +39,16 @@ impl VaapiEncoder {
         }
     }
 
-    pub fn new(width: u32, height: u32) -> Result<Self> {
-        ffmpeg::init()?;
+    pub fn new(width: u32, height: u32) -> Result<Self, ()> {
+        ffmpeg::init().unwrap();
 
-        let hw = VaapiHardware::new("/dev/dri/renderD128", width, height)?;
+        let hw = VaapiHardware::new("/dev/dri/renderD128", width, height).unwrap();
 
-        let codec = ffmpeg::encoder::find_by_name("h264_vaapi")
-            .ok_or_else(|| anyhow!("h264_vaapi missing"))?;
+        let codec = ffmpeg::encoder::find_by_name("h264_vaapi").expect("h264_vaapi missing");
 
         let context = ffmpeg::codec::context::Context::new_with_codec(codec);
 
-        let mut encoder = context.encoder().video()?;
+        let mut encoder = context.encoder().video().unwrap();
 
         encoder.set_width(width);
         encoder.set_height(height);
@@ -69,7 +67,7 @@ impl VaapiEncoder {
         options.set("bf", "0");
         options.set("g", "12");
 
-        let encoder = encoder.open_with(options)?;
+        let encoder = encoder.open_with(options).unwrap();
         info!(
             "VAAPI encoder opened: time_base={}/{} framerate={}/{}",
             encoder.time_base().numerator(),
@@ -78,15 +76,18 @@ impl VaapiEncoder {
             encoder.frame_rate().denominator()
         );
 
-        let scaler = SendScaler(ffmpeg::software::scaling::Context::get(
-            ffmpeg::format::Pixel::RGBA,
-            width,
-            height,
-            ffmpeg::format::Pixel::NV12,
-            width,
-            height,
-            ffmpeg::software::scaling::flag::Flags::BILINEAR,
-        )?);
+        let scaler = SendScaler(
+            ffmpeg::software::scaling::Context::get(
+                ffmpeg::format::Pixel::RGBA,
+                width,
+                height,
+                ffmpeg::format::Pixel::NV12,
+                width,
+                height,
+                ffmpeg::software::scaling::flag::Flags::BILINEAR,
+            )
+            .unwrap(),
+        );
 
         info!("VAAPI: encoder initialized {}x{}", width, height);
 
@@ -103,7 +104,7 @@ impl VaapiEncoder {
 }
 
 impl Encoder for VaapiEncoder {
-    fn submit(&mut self, frame: VideoFrame) -> Result<Vec<EncodedPacket>> {
+    fn submit(&mut self, frame: VideoFrame) -> Result<Vec<EncodedPacket>, ()> {
         let (data, width, height, stride, format, timestamp) = match frame {
             VideoFrame::Cpu {
                 data,
@@ -115,12 +116,12 @@ impl Encoder for VaapiEncoder {
             } => (data, width, height, stride, format, timestamp),
 
             VideoFrame::LinuxDmaBuf(_) => {
-                return Err(anyhow!("DMA-BUF path not implemented"));
+                return Err(());
             }
         };
 
         if format != VideoFormat::Rgba {
-            return Err(anyhow!("VAAPI expects RGBA input"));
+            return Err(());
         }
 
         let mut src =
@@ -139,7 +140,7 @@ impl Encoder for VaapiEncoder {
         let mut nv12 =
             ffmpeg::util::frame::video::Video::new(ffmpeg::format::Pixel::NV12, width, height);
 
-        self.scaler.0.run(&src, &mut nv12)?;
+        self.scaler.0.run(&src, &mut nv12).unwrap();
 
         let mut hw_frame = ffmpeg::util::frame::video::Video::empty();
 
@@ -147,13 +148,15 @@ impl Encoder for VaapiEncoder {
             let ret = av_hwframe_get_buffer(self.hw.frames_ctx(), hw_frame.as_mut_ptr(), 0);
 
             if ret < 0 {
-                return Err(anyhow!("av_hwframe_get_buffer failed {}", ret));
+                eprintln!("av_hwframe_get_buffer failed {ret}");
+                return Err(());
             }
 
             let ret = av_hwframe_transfer_data(hw_frame.as_mut_ptr(), nv12.as_ptr(), 0);
 
             if ret < 0 {
-                return Err(anyhow!("av_hwframe_transfer_data failed {}", ret));
+                eprintln!("av_hwframe_transfer_data failed {ret}");
+                return Err(());
             }
 
             let pts = timestamp as i64;
@@ -168,7 +171,7 @@ impl Encoder for VaapiEncoder {
             width, height, timestamp
         );
 
-        self.encoder.send_frame(&hw_frame)?;
+        self.encoder.send_frame(&hw_frame).unwrap();
 
         let mut packets = Vec::new();
 
@@ -221,10 +224,10 @@ impl Encoder for VaapiEncoder {
         Ok(packets)
     }
 
-    fn flush(&mut self) -> Result<Vec<EncodedPacket>> {
+    fn flush(&mut self) -> Result<Vec<EncodedPacket>, ()> {
         let mut packets = Vec::new();
 
-        self.encoder.send_eof()?;
+        self.encoder.send_eof().unwrap();
 
         loop {
             let mut packet = ffmpeg::Packet::empty();

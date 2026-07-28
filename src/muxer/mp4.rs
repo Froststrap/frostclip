@@ -1,4 +1,3 @@
-use anyhow::Result;
 use ffmpeg_next as ffmpeg;
 use ffmpeg_sys_next as ffi;
 use log::info;
@@ -14,15 +13,15 @@ pub struct Mp4Muxer {
 }
 
 impl Mp4Muxer {
-    pub fn create(path: &str, info: &VideoInfo) -> Result<Self> {
-        ffmpeg::init()?;
+    pub fn create(path: &str, info: &VideoInfo) -> Result<Self, ()> {
+        ffmpeg::init().unwrap();
 
-        let mut output = ffmpeg::format::output(path)?;
+        let mut output = ffmpeg::format::output(path).unwrap();
 
         let stream_index;
 
         {
-            let mut stream = output.add_stream(ffmpeg::codec::Id::H264)?;
+            let mut stream = output.add_stream(ffmpeg::codec::Id::H264).unwrap();
 
             let stream_time_base = ffmpeg::Rational::new(info.time_base_num, info.time_base_den);
 
@@ -57,7 +56,7 @@ impl Mp4Muxer {
                         as *mut u8;
 
                     if data.is_null() {
-                        anyhow::bail!("failed allocating codec extradata");
+                        panic!("failed allocating codec extradata");
                     }
 
                     std::ptr::copy_nonoverlapping(info.extradata.as_ptr(), data, size);
@@ -81,7 +80,7 @@ impl Mp4Muxer {
                 .denominator()
         );
 
-        output.write_header()?;
+        output.write_header().unwrap();
 
         Ok(Self {
             output,
@@ -93,17 +92,13 @@ impl Mp4Muxer {
 }
 
 impl Muxer for Mp4Muxer {
-    fn write(&mut self, packet: &EncodedPacket) -> Result<()> {
+    fn write(&mut self, packet: &EncodedPacket) -> Result<(), ()> {
         let mut pkt = ffmpeg::Packet::copy(&packet.data);
 
         pkt.set_stream(self.stream_index);
 
         let stream = self.output.stream(self.stream_index).unwrap();
-
-        let muxer_tb = stream.time_base();
-
         let start_pts = self.start_pts.get_or_insert(packet.pts);
-
         let adjusted_pts = packet.pts - *start_pts;
         let adjusted_dts = packet.dts - *start_pts;
 
@@ -191,7 +186,7 @@ impl Muxer for Mp4Muxer {
                 .denominator()
         );
 
-        pkt.write_interleaved(&mut self.output)?;
+        pkt.write_interleaved(&mut self.output).unwrap();
         if packet.is_keyframe {
             info!(
                 "KEYFRAME DATA: {:02x?}",
@@ -207,8 +202,8 @@ impl Muxer for Mp4Muxer {
         Ok(())
     }
 
-    fn finish(mut self: Box<Self>) -> Result<()> {
-        self.output.write_trailer()?;
+    fn finish(mut self: Box<Self>) -> Result<(), ()> {
+        self.output.write_trailer().unwrap();
 
         Ok(())
     }

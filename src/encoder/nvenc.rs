@@ -1,5 +1,3 @@
-use anyhow::{Result, anyhow};
-
 use crate::{
     encoder::{EncodedPacket, Encoder, VideoInfo},
     frame::VideoFrame,
@@ -8,25 +6,26 @@ use crate::{
 pub struct NvencEncoder {}
 
 impl NvencEncoder {
-    pub fn new() -> Result<Self> {
+    pub fn new() -> Result<Self, ()> {
         Ok(Self {})
     }
 }
 
 impl Encoder for NvencEncoder {
-    fn submit(&mut self, frame: VideoFrame) -> Result<Vec<EncodedPacket>> {
+    fn submit(&mut self, frame: VideoFrame) -> Result<Vec<EncodedPacket>, ()> {
         match frame {
-            VideoFrame::LinuxDmaBuf(dmabuf) => {
+            VideoFrame::LinuxDmaBuf(_dmabuf) => {
                 // TODO: actually implement nvenc support
 
                 todo!("NVENC support not yet implemented")
             }
-
-            _ => Err(anyhow!("NVENC only supports DMA-BUF frames")),
+            _ => {
+                todo!()
+            }
         }
     }
 
-    fn flush(&mut self) -> Result<Vec<EncodedPacket>> {
+    fn flush(&mut self) -> Result<Vec<EncodedPacket>, ()> {
         Ok(Vec::new())
     }
 

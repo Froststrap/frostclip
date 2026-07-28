@@ -1,4 +1,3 @@
-use anyhow::{Result, anyhow};
 use ffmpeg_next as ffmpeg;
 use log::info;
 
@@ -33,15 +32,14 @@ impl SoftwareEncoder {
         output_width: u32,
         output_height: u32,
         framerate: u32,
-    ) -> Result<Self> {
-        ffmpeg::init()?;
+    ) -> Result<Self, ()> {
+        ffmpeg::init().unwrap();
 
-        let codec =
-            ffmpeg::encoder::find_by_name("libx264").ok_or_else(|| anyhow!("libx264 not found"))?;
+        let codec = ffmpeg::encoder::find_by_name("libx264").expect("libx264 not found");
 
         let context = ffmpeg::codec::context::Context::new_with_codec(codec);
 
-        let mut encoder = context.encoder().video()?;
+        let mut encoder = context.encoder().video().unwrap();
 
         encoder.set_width(output_width);
         encoder.set_height(output_height);
@@ -54,17 +52,20 @@ impl SoftwareEncoder {
         options.set("preset", "veryfast");
         options.set("tune", "zerolatency");
 
-        let encoder = encoder.open_with(options)?;
+        let encoder = encoder.open_with(options).unwrap();
 
-        let scaler = SendScaler(ffmpeg::software::scaling::Context::get(
-            ffmpeg::format::Pixel::RGBA,
-            input_width,
-            input_height,
-            ffmpeg::format::Pixel::YUV420P,
-            output_width,
-            output_height,
-            ffmpeg::software::scaling::flag::Flags::BILINEAR,
-        )?);
+        let scaler = SendScaler(
+            ffmpeg::software::scaling::Context::get(
+                ffmpeg::format::Pixel::RGBA,
+                input_width,
+                input_height,
+                ffmpeg::format::Pixel::YUV420P,
+                output_width,
+                output_height,
+                ffmpeg::software::scaling::flag::Flags::BILINEAR,
+            )
+            .unwrap(),
+        );
 
         println!(
             "H264 initialized input={}x{} output={}x{}",
@@ -88,7 +89,7 @@ impl SoftwareEncoder {
 }
 
 impl Encoder for SoftwareEncoder {
-    fn submit(&mut self, frame: VideoFrame) -> Result<Vec<EncodedPacket>> {
+    fn submit(&mut self, frame: VideoFrame) -> Result<Vec<EncodedPacket>, ()> {
         self.frame_count += 1;
 
         let VideoFrame::Cpu {
@@ -100,21 +101,21 @@ impl Encoder for SoftwareEncoder {
             ..
         } = frame
         else {
-            return Err(anyhow!("DMA-BUF unsupported"));
+            eprintln!("DMA-BUF unsupported");
+            return Err(());
         };
 
         if format != crate::frame::VideoFormat::Rgba {
-            return Err(anyhow!("Expected RGBA"));
+            eprintln!("Expected RGBA");
+            return Err(());
         }
 
         if width != self.input_width || height != self.input_height {
-            return Err(anyhow!(
+            eprintln!(
                 "Input resolution changed {}x{} expected {}x{}",
-                width,
-                height,
-                self.input_width,
-                self.input_height
-            ));
+                width, height, self.input_width, self.input_height
+            );
+            return Err(());
         }
 
         let mut in_frame = ffmpeg::frame::Video::empty();
@@ -143,9 +144,9 @@ impl Encoder for SoftwareEncoder {
 
         let mut out_frame = ffmpeg::frame::Video::empty();
 
-        self.scaler.0.run(&in_frame, &mut out_frame)?;
+        self.scaler.0.run(&in_frame, &mut out_frame).unwrap();
 
-        self.encoder.send_frame(&out_frame)?;
+        self.encoder.send_frame(&out_frame).unwrap();
 
         let mut packets = Vec::new();
         let mut packet = ffmpeg::Packet::empty();
@@ -165,7 +166,7 @@ impl Encoder for SoftwareEncoder {
         Ok(packets)
     }
 
-    fn flush(&mut self) -> Result<Vec<EncodedPacket>> {
+    fn flush(&mut self) -> Result<Vec<EncodedPacket>, ()> {
         Ok(Vec::new())
     }
 

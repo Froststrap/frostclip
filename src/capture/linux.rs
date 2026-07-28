@@ -1,5 +1,3 @@
-use anyhow::Result;
-
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
@@ -18,7 +16,7 @@ pub struct LinuxCapture {
 }
 
 impl LinuxCapture {
-    pub fn new() -> Result<Self> {
+    pub fn new() -> Result<Self, ()> {
         Ok(Self {
             running: Arc::new(AtomicBool::new(false)),
         })
@@ -40,7 +38,7 @@ impl CaptureBackend for LinuxCapture {
         }
     }
 
-    fn start(&mut self, callback: Box<dyn Fn(VideoFrame) + Send + Sync>) -> Result<()> {
+    fn start(&mut self, callback: Box<dyn Fn(VideoFrame) + Send + Sync>) -> Result<(), ()> {
         self.running.store(true, Ordering::Relaxed);
 
         let running = Arc::clone(&self.running);
@@ -142,7 +140,7 @@ impl CaptureBackend for LinuxCapture {
         Ok(())
     }
 
-    fn stop(&mut self) -> Result<()> {
+    fn stop(&mut self) -> Result<(), ()> {
         self.running.store(false, Ordering::Relaxed);
 
         Ok(())

@@ -1,4 +1,3 @@
-use anyhow::{Result, bail};
 use std::path::PathBuf;
 
 #[derive(Clone)]
@@ -24,12 +23,11 @@ impl Config {
         replay_buffer_seconds: u32,
         default_clip_seconds: u32,
         output_dir: impl Into<PathBuf>,
-    ) -> Result<Self> {
+    ) -> Result<Self, ()> {
         if default_clip_seconds > replay_buffer_seconds {
-            bail!(
+            panic!(
                 "default_clip_seconds ({}) cannot exceed replay_buffer_seconds ({})",
-                default_clip_seconds,
-                replay_buffer_seconds
+                default_clip_seconds, replay_buffer_seconds
             );
         }
 

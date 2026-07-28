@@ -1,4 +1,3 @@
-use anyhow::Result;
 use std::sync::{Arc, Mutex};
 
 use log::{debug, error, info};
@@ -22,14 +21,14 @@ pub struct CaptureEngine {
 }
 
 impl CaptureEngine {
-    pub fn new(config: Config) -> Result<Self> {
+    pub fn new(config: Config) -> Result<Self, ()> {
         info!("ENGINE: creating capture engine");
 
-        config.ensure_output_dir()?;
+        config.ensure_output_dir().unwrap();
 
         info!("ENGINE: output directory {:?}", config.output_dir);
 
-        let capture = Capture::new()?;
+        let capture = Capture::new().unwrap();
         let capture_info = capture.info();
 
         info!("ENGINE: capture backend created");
@@ -52,7 +51,8 @@ impl CaptureEngine {
 
         let video_info = encoder
             .video_info()
-            .ok_or_else(|| anyhow::anyhow!("Missing video info"))?;
+            .ok_or_else(|| panic!("Missing video info"))
+            .unwrap();
 
         let timebase = video_info.time_base_den as i64;
 
@@ -72,7 +72,7 @@ impl CaptureEngine {
         })
     }
 
-    pub fn start(&mut self) -> Result<()> {
+    pub fn start(&mut self) -> Result<(), ()> {
         info!("ENGINE: start requested");
 
         let encoder = Arc::clone(&self.encoder);
@@ -115,7 +115,7 @@ impl CaptureEngine {
         Ok(())
     }
 
-    pub fn stop(&mut self) -> Result<()> {
+    pub fn stop(&mut self) -> Result<(), ()> {
         info!("ENGINE: stopping capture");
 
         self.capture.stop()?;
@@ -133,7 +133,7 @@ impl CaptureEngine {
         self.running
     }
 
-    pub fn submit_frame(&mut self, frame: VideoFrame) -> Result<()> {
+    pub fn submit_frame(&mut self, frame: VideoFrame) -> Result<(), ()> {
         debug!("ENGINE: manual submit_frame called");
 
         let packets = self.encoder.lock().unwrap().submit(frame)?;
@@ -156,11 +156,11 @@ impl CaptureEngine {
         Ok(())
     }
 
-    pub fn save_clip(&self) -> Result<String> {
+    pub fn save_clip(&self) -> Result<String, ()> {
         self.save_clip_with_duration(self.config.default_clip_seconds as usize)
     }
 
-    pub fn save_clip_with_duration(&self, seconds: usize) -> Result<String> {
+    pub fn save_clip_with_duration(&self, seconds: usize) -> Result<String, ()> {
         info!("ENGINE: saving clip {} seconds", seconds);
 
         let buffer = self.buffer.lock().unwrap();
@@ -182,7 +182,7 @@ impl CaptureEngine {
         drop(buffer);
 
         if packets.is_empty() {
-            anyhow::bail!("Replay buffer is empty");
+            panic!("Replay buffer is empty");
         }
 
         let muxer_factory = crate::muxer::Mp4MuxerFactory;
@@ -199,7 +199,7 @@ impl CaptureEngine {
 
         let video_info = encoder
             .video_info()
-            .ok_or_else(|| anyhow::anyhow!("Missing video info"))?;
+            .ok_or_else(|| panic!("Missing video info"))?;
 
         drop(encoder);
 

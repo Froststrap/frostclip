@@ -16,10 +16,6 @@ pub struct EncodedPacket {
     pub is_keyframe: bool,
 }
 
-// pub struct CodecParameters {
-//     ptr: *mut ffi::AVCodecParameters,
-// }
-
 #[derive(Clone)]
 pub struct VideoInfo {
     pub width: u32,
@@ -35,22 +31,12 @@ pub struct VideoInfo {
 }
 
 pub trait Encoder: Send {
-    fn submit(&mut self, frame: VideoFrame) -> anyhow::Result<Vec<EncodedPacket>>;
+    fn submit(&mut self, frame: VideoFrame) -> Result<Vec<EncodedPacket>, ()>;
 
-    fn flush(&mut self) -> anyhow::Result<Vec<EncodedPacket>>;
+    fn flush(&mut self) -> Result<Vec<EncodedPacket>, ()>;
 
     fn video_info(&self) -> Option<VideoInfo>;
 }
-
-// impl Drop for CodecParameters {
-//     fn drop(&mut self) {
-//         unsafe {
-//             if !self.ptr.is_null() {
-//                 ffi::avcodec_parameters_free(&mut self.ptr);
-//             }
-//         }
-//     }
-// }
 
 pub fn extract_codec_parameters(ctx: *const ffi::AVCodecContext) -> Option<Vec<u8>> {
     unsafe {

@@ -3,13 +3,9 @@ name = "frostclip"
 version = "0.0.1"
 edition = "2024"
 
-[lib]
-crate-type = ["cdylib", "rlib"]
-
 [dependencies]
 ffmpeg-next = "8.1"
 ffmpeg-sys-next = "8.1"
-anyhow = "1.0"
 libc = "0.2"
 log = "0.4"
 env_logger = "0.11"

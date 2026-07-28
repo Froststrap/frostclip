@@ -1,15 +1,23 @@
+pub mod buffer;
+pub mod capture;
+pub mod config;
+pub mod encoder;
+pub mod engine;
+pub mod frame;
+pub mod muxer;
+
+use config::Config;
+use engine::CaptureEngine;
 use env_logger;
-use frostclip::config::Config;
-use frostclip::engine::CaptureEngine;
 use std::fs;
 use std::path::Path;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), ()> {
     env_logger::init();
 
     if Path::new("./clips").exists() {
         println!("Cleaning up existing clips directory...");
-        fs::remove_dir_all("./clips")?;
+        fs::remove_dir_all("./clips").unwrap();
     }
 
     println!("Initializing capture engine...");

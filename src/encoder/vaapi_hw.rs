@@ -1,4 +1,3 @@
-use anyhow::{Result, anyhow};
 use ffmpeg_sys_next::*;
 use std::ffi::CString;
 
@@ -10,8 +9,8 @@ pub struct VaapiHardware {
 unsafe impl Send for VaapiHardware {}
 
 impl VaapiHardware {
-    pub fn new(path: &str, width: u32, height: u32) -> Result<Self> {
-        let path = CString::new(path)?;
+    pub fn new(path: &str, width: u32, height: u32) -> Result<Self, String> {
+        let path = CString::new(path).unwrap();
 
         let mut device_ctx: *mut AVBufferRef = std::ptr::null_mut();
 
@@ -26,7 +25,7 @@ impl VaapiHardware {
         };
 
         if ret < 0 {
-            return Err(anyhow!("VAAPI device creation failed {}", ret));
+            return Err(format!("VAAPI device creation failed {}", ret));
         }
 
         let frames_ctx = unsafe { av_hwframe_ctx_alloc(device_ctx) };
@@ -36,7 +35,7 @@ impl VaapiHardware {
                 av_buffer_unref(&mut device_ctx);
             }
 
-            return Err(anyhow!("VAAPI frame context allocation failed"));
+            return Err("VAAPI frame context allocation failed".into());
         }
 
         let frames = unsafe { &mut *((*frames_ctx).data as *mut AVHWFramesContext) };
@@ -58,7 +57,7 @@ impl VaapiHardware {
                 av_buffer_unref(&mut device_ctx);
             }
 
-            return Err(anyhow!("VAAPI frame context init failed {}", ret));
+            return Err(format!("VAAPI frame context init failed {}", ret));
         }
 
         Ok(Self {

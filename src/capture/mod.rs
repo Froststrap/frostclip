@@ -1,5 +1,3 @@
-use anyhow::Result;
-
 use crate::frame::VideoFrame;
 
 pub mod linux;
@@ -11,9 +9,9 @@ pub struct CaptureInfo {
 }
 
 pub trait CaptureBackend {
-    fn start(&mut self, callback: Box<dyn Fn(VideoFrame) + Send + Sync>) -> Result<()>;
+    fn start(&mut self, callback: Box<dyn Fn(VideoFrame) + Send + Sync>) -> Result<(), ()>;
 
-    fn stop(&mut self) -> Result<()>;
+    fn stop(&mut self) -> Result<(), ()>;
 
     fn info(&self) -> CaptureInfo;
 }
@@ -23,17 +21,17 @@ pub struct Capture {
 }
 
 impl Capture {
-    pub fn new() -> Result<Self> {
+    pub fn new() -> Result<Self, ()> {
         Ok(Self {
             backend: Box::new(linux::LinuxCapture::new()?),
         })
     }
 
-    pub fn start(&mut self, callback: Box<dyn Fn(VideoFrame) + Send + Sync>) -> Result<()> {
+    pub fn start(&mut self, callback: Box<dyn Fn(VideoFrame) + Send + Sync>) -> Result<(), ()> {
         self.backend.start(callback)
     }
 
-    pub fn stop(&mut self) -> Result<()> {
+    pub fn stop(&mut self) -> Result<(), ()> {
         self.backend.stop()
     }
 
