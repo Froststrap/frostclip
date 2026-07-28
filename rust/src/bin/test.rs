@@ -14,7 +14,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Initializing capture engine...");
 
-    let config = Config::new(1366, 768, 60, 3000, 30, 10, "./clips")?;
+    let config = Config::new(1366, 768, 60, 3000, 300, 5, "./clips")?;
 
     let clip_seconds = config.default_clip_seconds;
 

@@ -57,7 +57,7 @@ impl SoftwareEncoder {
         let encoder = encoder.open_with(options)?;
 
         let scaler = SendScaler(ffmpeg::software::scaling::Context::get(
-            ffmpeg::format::Pixel::BGRA,
+            ffmpeg::format::Pixel::RGBA,
             input_width,
             input_height,
             ffmpeg::format::Pixel::YUV420P,
@@ -103,8 +103,8 @@ impl Encoder for SoftwareEncoder {
             return Err(anyhow!("DMA-BUF unsupported"));
         };
 
-        if format != crate::frame::VideoFormat::Bgra {
-            return Err(anyhow!("Expected BGRA"));
+        if format != crate::frame::VideoFormat::Rgba {
+            return Err(anyhow!("Expected RGBA"));
         }
 
         if width != self.input_width || height != self.input_height {
@@ -120,7 +120,7 @@ impl Encoder for SoftwareEncoder {
         let mut in_frame = ffmpeg::frame::Video::empty();
 
         unsafe {
-            in_frame.alloc(ffmpeg::format::Pixel::BGRA, width, height);
+            in_frame.alloc(ffmpeg::format::Pixel::RGBA, width, height);
         }
 
         let dst_stride = in_frame.stride(0);

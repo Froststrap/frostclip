@@ -18,7 +18,7 @@ pub fn create_encoder(config: EncoderConfig) -> Result<Box<dyn Encoder>> {
     if VaapiEncoder::probe() {
         info!("Using VAAPI encoder");
 
-        match VaapiEncoder::new(config.output_width, config.output_height, config.framerate) {
+        match VaapiEncoder::new(config.output_width, config.output_height) {
             Ok(encoder) => {
                 return Ok(Box::new(encoder));
             }

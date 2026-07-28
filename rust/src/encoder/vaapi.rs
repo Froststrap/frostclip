@@ -15,8 +15,9 @@ unsafe impl Send for SendScaler {}
 pub struct VaapiEncoder {
     width: u32,
     height: u32,
-    framerate: u32,
     frame_count: u64,
+    last_packet_pts: Option<i64>,
+
     encoder: ffmpeg::codec::encoder::video::Encoder,
     scaler: SendScaler,
     hw: VaapiHardware,
@@ -39,7 +40,7 @@ impl VaapiEncoder {
         }
     }
 
-    pub fn new(width: u32, height: u32, framerate: u32) -> Result<Self> {
+    pub fn new(width: u32, height: u32) -> Result<Self> {
         ffmpeg::init()?;
 
         let hw = VaapiHardware::new("/dev/dri/renderD128", width, height)?;
@@ -53,9 +54,7 @@ impl VaapiEncoder {
 
         encoder.set_width(width);
         encoder.set_height(height);
-
-        encoder.set_time_base((1, framerate as i32));
-        encoder.set_frame_rate(Some(ffmpeg::Rational::new(framerate as i32, 1)));
+        encoder.set_time_base(ffmpeg::Rational::new(1, 1_000_000));
 
         unsafe {
             (*encoder.as_mut_ptr()).hw_frames_ctx = av_buffer_ref(hw.frames_ctx());
@@ -67,6 +66,8 @@ impl VaapiEncoder {
 
         options.set("rc_mode", "ICQ");
         options.set("qp", "20");
+        options.set("bf", "0");
+        options.set("g", "12");
 
         let encoder = encoder.open_with(options)?;
         info!(
@@ -78,7 +79,7 @@ impl VaapiEncoder {
         );
 
         let scaler = SendScaler(ffmpeg::software::scaling::Context::get(
-            ffmpeg::format::Pixel::BGRA,
+            ffmpeg::format::Pixel::RGBA,
             width,
             height,
             ffmpeg::format::Pixel::NV12,
@@ -92,7 +93,7 @@ impl VaapiEncoder {
         Ok(Self {
             width,
             height,
-            framerate,
+            last_packet_pts: None,
             frame_count: 0,
             encoder,
             scaler,
@@ -118,12 +119,12 @@ impl Encoder for VaapiEncoder {
             }
         };
 
-        if format != VideoFormat::Bgra {
-            return Err(anyhow!("VAAPI expects BGRA input"));
+        if format != VideoFormat::Rgba {
+            return Err(anyhow!("VAAPI expects RGBA input"));
         }
 
         let mut src =
-            ffmpeg::util::frame::video::Video::new(ffmpeg::format::Pixel::BGRA, width, height);
+            ffmpeg::util::frame::video::Video::new(ffmpeg::format::Pixel::RGBA, width, height);
 
         let dst_stride = src.stride(0);
 
@@ -155,7 +156,7 @@ impl Encoder for VaapiEncoder {
                 return Err(anyhow!("av_hwframe_transfer_data failed {}", ret));
             }
 
-            let pts = (timestamp as f64 / 1_000_000.0 * self.framerate as f64) as i64;
+            let pts = timestamp as i64;
 
             (*hw_frame.as_mut_ptr()).pts = pts;
 
@@ -187,12 +188,22 @@ impl Encoder for VaapiEncoder {
                         self.encoder.time_base().denominator(),
                     );
 
+                    let pts = packet.pts().unwrap_or(0);
+                    let dts = packet.dts().unwrap_or(pts);
+
+                    let duration = match self.last_packet_pts {
+                        Some(last) => pts - last,
+                        None => 0,
+                    };
+
+                    self.last_packet_pts = Some(pts);
+
                     packets.push(EncodedPacket {
                         data: packet.data().unwrap_or(&[]).to_vec(),
 
-                        pts: packet.pts().unwrap_or(0),
-                        dts: packet.dts().unwrap_or(0),
-                        duration: 1,
+                        pts,
+                        dts,
+                        duration,
 
                         is_keyframe: packet.is_key(),
                     });
@@ -204,6 +215,7 @@ impl Encoder for VaapiEncoder {
             }
         }
 
+        info!("FRAME COUNT {}", self.frame_count);
         self.frame_count += 1;
 
         Ok(packets)
@@ -219,12 +231,22 @@ impl Encoder for VaapiEncoder {
 
             match self.encoder.receive_packet(&mut packet) {
                 Ok(_) => {
+                    let pts = packet.pts().unwrap_or(0);
+                    let dts = packet.dts().unwrap_or(pts);
+
+                    let duration = match self.last_packet_pts {
+                        Some(last) => pts - last,
+                        None => 0,
+                    };
+
+                    self.last_packet_pts = Some(pts);
+
                     packets.push(EncodedPacket {
                         data: packet.data().unwrap_or(&[]).to_vec(),
 
-                        pts: packet.pts().unwrap_or(0),
-                        dts: packet.dts().unwrap_or(0),
-                        duration: packet.duration(),
+                        pts,
+                        dts,
+                        duration,
 
                         is_keyframe: packet.is_key(),
                     });

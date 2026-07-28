@@ -9,6 +9,8 @@ use crate::muxer::Muxer;
 pub struct Mp4Muxer {
     output: ffmpeg::format::context::Output,
     stream_index: usize,
+    start_pts: Option<i64>,
+    encoder_time_base: ffmpeg::Rational,
 }
 
 impl Mp4Muxer {
@@ -25,11 +27,10 @@ impl Mp4Muxer {
             let stream_time_base = ffmpeg::Rational::new(info.time_base_num, info.time_base_den);
 
             info!(
-                "MUXER: setting stream timebase={}/{}",
+                "MUXER: video timebase={}/{}",
                 stream_time_base.numerator(),
                 stream_time_base.denominator()
             );
-
             stream.set_time_base(stream_time_base);
 
             info!(
@@ -85,6 +86,8 @@ impl Mp4Muxer {
         Ok(Self {
             output,
             stream_index,
+            start_pts: None,
+            encoder_time_base: ffmpeg::Rational::new(info.time_base_num, info.time_base_den),
         })
     }
 }
@@ -97,15 +100,21 @@ impl Muxer for Mp4Muxer {
 
         let stream = self.output.stream(self.stream_index).unwrap();
 
-        let encoder_tb = ffmpeg::Rational::new(1, 60);
+        let muxer_tb = stream.time_base();
+
+        let start_pts = self.start_pts.get_or_insert(packet.pts);
+
+        let adjusted_pts = packet.pts - *start_pts;
+        let adjusted_dts = packet.dts - *start_pts;
+
         let muxer_tb = stream.time_base();
 
         let pts = unsafe {
             ffi::av_rescale_q(
-                packet.pts,
+                adjusted_pts,
                 ffi::AVRational {
-                    num: encoder_tb.numerator(),
-                    den: encoder_tb.denominator(),
+                    num: self.encoder_time_base.numerator(),
+                    den: self.encoder_time_base.denominator(),
                 },
                 ffi::AVRational {
                     num: muxer_tb.numerator(),
@@ -116,10 +125,10 @@ impl Muxer for Mp4Muxer {
 
         let dts = unsafe {
             ffi::av_rescale_q(
-                packet.dts,
+                adjusted_dts,
                 ffi::AVRational {
-                    num: encoder_tb.numerator(),
-                    den: encoder_tb.denominator(),
+                    num: self.encoder_time_base.numerator(),
+                    den: self.encoder_time_base.denominator(),
                 },
                 ffi::AVRational {
                     num: muxer_tb.numerator(),
@@ -132,8 +141,8 @@ impl Muxer for Mp4Muxer {
             ffi::av_rescale_q(
                 packet.duration,
                 ffi::AVRational {
-                    num: encoder_tb.numerator(),
-                    den: encoder_tb.denominator(),
+                    num: self.encoder_time_base.numerator(),
+                    den: self.encoder_time_base.denominator(),
                 },
                 ffi::AVRational {
                     num: muxer_tb.numerator(),
@@ -143,8 +152,10 @@ impl Muxer for Mp4Muxer {
         };
 
         info!(
-            "RESCALE: {} -> {} | pts {}->{} dts {}->{} duration {}->{}",
-            encoder_tb.numerator(),
+            "RESCALE: {}/{} -> {}/{} | pts {}->{} dts {}->{} duration {}->{}",
+            self.encoder_time_base.numerator(),
+            self.encoder_time_base.denominator(),
+            muxer_tb.numerator(),
             muxer_tb.denominator(),
             packet.pts,
             pts,

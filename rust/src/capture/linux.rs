@@ -120,7 +120,7 @@ impl CaptureBackend for LinuxCapture {
 
                             stride: width * 4,
 
-                            format: VideoFormat::Bgra,
+                            format: VideoFormat::Rgba,
 
                             timestamp,
                         };

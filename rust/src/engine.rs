@@ -50,17 +50,17 @@ impl CaptureEngine {
 
         info!("ENGINE: encoder created");
 
-        let buffer = ReplayBuffer::new(
-            config.framerate as usize,
-            config.replay_buffer_seconds as usize,
-            config.width as usize,
-            config.height as usize,
-        );
+        let video_info = encoder
+            .video_info()
+            .ok_or_else(|| anyhow::anyhow!("Missing video info"))?;
+
+        let timebase = video_info.time_base_den as i64;
+
+        let buffer = ReplayBuffer::new(config.replay_buffer_seconds as usize, timebase);
 
         info!(
-            "ENGINE: replay buffer created duration={}s max_frames={}",
-            config.replay_buffer_seconds,
-            config.framerate * config.replay_buffer_seconds
+            "ENGINE: replay buffer created duration={}s timebase={}",
+            config.replay_buffer_seconds, timebase
         );
 
         Ok(Self {
@@ -163,11 +163,23 @@ impl CaptureEngine {
     pub fn save_clip_with_duration(&self, seconds: usize) -> Result<String> {
         info!("ENGINE: saving clip {} seconds", seconds);
 
-        let packets = self
-            .buffer
-            .lock()
-            .unwrap()
-            .get_last_seconds(seconds, self.config.framerate as usize);
+        let buffer = self.buffer.lock().unwrap();
+
+        let packets = buffer.get_last_seconds(seconds);
+        let timebase = buffer.timebase();
+
+        info!("BUFFER: requested={}s packets={}", seconds, packets.len());
+
+        if let (Some(first), Some(last)) = (packets.first(), packets.last()) {
+            info!(
+                "BUFFER RANGE: first_pts={} last_pts={} duration={}s",
+                first.pts,
+                last.pts,
+                (last.pts - first.pts) as f64 / timebase as f64
+            );
+        }
+
+        drop(buffer);
 
         if packets.is_empty() {
             anyhow::bail!("Replay buffer is empty");
@@ -185,13 +197,13 @@ impl CaptureEngine {
 
         let encoder = self.encoder.lock().unwrap();
 
-        let info = encoder
+        let video_info = encoder
             .video_info()
             .ok_or_else(|| anyhow::anyhow!("Missing video info"))?;
 
         drop(encoder);
 
-        let mut muxer = muxer_factory.create(path.to_str().unwrap(), &info)?;
+        let mut muxer = muxer_factory.create(path.to_str().unwrap(), &video_info)?;
 
         for packet in packets {
             muxer.write(&packet)?;
