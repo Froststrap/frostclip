@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use log::{debug, error, info};
+use tracing::{debug, error, info};
 
 use crate::buffer::ReplayBuffer;
 use crate::capture::Capture;

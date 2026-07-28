@@ -1,5 +1,5 @@
 use ffmpeg_next as ffmpeg;
-use log::info;
+use tracing::info;
 
 use crate::{
     encoder::{EncodedPacket, Encoder, VideoInfo, extract_codec_parameters},

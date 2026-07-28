@@ -1,6 +1,6 @@
 use ffmpeg_next as ffmpeg;
 use ffmpeg_sys_next as ffi;
-use log::info;
+use tracing::info;
 
 use crate::encoder::{EncodedPacket, VideoInfo};
 use crate::muxer::Muxer;

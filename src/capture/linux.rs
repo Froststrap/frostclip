@@ -3,6 +3,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 use std::time::{Duration, Instant};
+use tracing::{error, info};
 
 use xcap::Monitor;
 
@@ -46,13 +47,13 @@ impl CaptureBackend for LinuxCapture {
         let callback = Arc::new(Mutex::new(callback));
 
         std::thread::spawn(move || {
-            log::info!("XCAP: capture thread started");
+            info!("XCAP: capture thread started");
 
             let monitors = match Monitor::all() {
                 Ok(monitors) => monitors,
 
                 Err(err) => {
-                    log::error!("XCAP: failed getting monitors {:?}", err);
+                    error!("XCAP: failed getting monitors {:?}", err);
                     return;
                 }
             };
@@ -61,7 +62,7 @@ impl CaptureBackend for LinuxCapture {
                 Some(monitor) => monitor,
 
                 None => {
-                    log::error!("XCAP: no monitors available");
+                    error!("XCAP: no monitors available");
                     return;
                 }
             };
@@ -70,7 +71,7 @@ impl CaptureBackend for LinuxCapture {
                 Ok(width) => width,
 
                 Err(err) => {
-                    log::error!("XCAP: failed width {:?}", err);
+                    error!("XCAP: failed width {:?}", err);
                     return;
                 }
             };
@@ -79,12 +80,12 @@ impl CaptureBackend for LinuxCapture {
                 Ok(height) => height,
 
                 Err(err) => {
-                    log::error!("XCAP: failed height {:?}", err);
+                    error!("XCAP: failed height {:?}", err);
                     return;
                 }
             };
 
-            log::info!("XCAP: capturing {}x{}", width, height);
+            info!("XCAP: capturing {}x{}", width, height);
 
             let start_time = Instant::now();
 
@@ -96,12 +97,12 @@ impl CaptureBackend for LinuxCapture {
 
                 match monitor.capture_image() {
                     Ok(image) => {
-                        log::info!("XCAP capture took {:?}", capture_start.elapsed());
+                        info!("XCAP capture took {:?}", capture_start.elapsed());
 
                         frame_counter += 1;
 
                         if fps_timer.elapsed() >= Duration::from_secs(1) {
-                            log::info!("XCAP capture FPS: {}", frame_counter);
+                            info!("XCAP capture FPS: {}", frame_counter);
 
                             frame_counter = 0;
                             fps_timer = Instant::now();
@@ -129,12 +130,12 @@ impl CaptureBackend for LinuxCapture {
                     }
 
                     Err(err) => {
-                        log::error!("XCAP: capture failed {:?}", err);
+                        error!("XCAP: capture failed {:?}", err);
                     }
                 }
             }
 
-            log::info!("XCAP: capture thread stopped");
+            info!("XCAP: capture thread stopped");
         });
 
         Ok(())

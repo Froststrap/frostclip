@@ -1,7 +1,6 @@
 use ffmpeg_next as ffmpeg;
 use ffmpeg_sys_next::{av_buffer_ref, av_hwframe_get_buffer, av_hwframe_transfer_data};
-
-use log::{info, warn};
+use tracing::{info, warn};
 
 use crate::encoder::vaapi_hw::VaapiHardware;
 use crate::encoder::{EncodedPacket, Encoder, VideoInfo, extract_codec_parameters};

@@ -1,4 +1,4 @@
-use log::{info, warn};
+use tracing::{info, warn};
 
 use crate::encoder::{Encoder, software::SoftwareEncoder, vaapi::VaapiEncoder};
 

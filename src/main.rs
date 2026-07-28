@@ -8,19 +8,20 @@ pub mod muxer;
 
 use config::Config;
 use engine::CaptureEngine;
-use env_logger;
 use std::fs;
 use std::path::Path;
+use tracing::{debug, info};
 
 fn main() -> Result<(), ()> {
-    env_logger::init();
+    tracing::subscriber::set_global_default(logging_subscriber::SimpleSubscriber).unwrap();
+    tracing::info!("Starting");
 
     if Path::new("./clips").exists() {
-        println!("Cleaning up existing clips directory...");
+        debug!("Cleaning up existing clips directory...");
         fs::remove_dir_all("./clips").unwrap();
     }
 
-    println!("Initializing capture engine...");
+    debug!("Initializing capture engine...");
 
     let config = Config::new(1366, 768, 60, 3000, 300, 5, "./clips")?;
 
@@ -28,19 +29,19 @@ fn main() -> Result<(), ()> {
 
     let mut engine = CaptureEngine::new(config)?;
 
-    println!("Starting capture...");
+    info!("Starting capture...");
     engine.start()?;
 
-    println!("Capturing for {} seconds...", clip_seconds);
+    info!("Capturing for {clip_seconds} seconds...");
     std::thread::sleep(std::time::Duration::from_secs(clip_seconds as u64));
 
-    println!("Saving clip {} seconds...", clip_seconds);
+    info!("Saving clip {clip_seconds} seconds...");
     let clip_path = engine.save_clip()?;
-    println!("✅ Clip saved to: {}", clip_path);
+    println!("Clip saved to: {clip_path}");
 
-    println!("Stopping capture...");
+    info!("Stopping capture...");
     engine.stop()?;
 
-    println!("Done!");
+    info!("Done!");
     Ok(())
 }
