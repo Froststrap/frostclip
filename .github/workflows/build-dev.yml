@@ -11,36 +11,56 @@ jobs:
         include:
           - os: windows-latest
             just-target: windows-dev
-            artifacts: frostclip.exe
+            artifact: build/frostclip-windows-dev.exe
             name: frostclip-dev-windows
+
           - os: ubuntu-latest
             just-target: linux-dev
-            artifacts: frostclip-linux
+            artifact: build/frostclip-linux-dev
             name: frostclip-dev-linux
+
           - os: macos-latest
             just-target: mac-dev
-            artifacts: frostclip-macos
-            name: frostclip-dev-macos
+            artifact: build/frostclip-mac-dev
+            name: frostclip-dev-mac
 
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - name: Install Go
-        uses: actions/setup-go@v4
-        with:
-          go-version: "1.21"
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
 
       - name: Install Just
-        uses: extractions/setup-just@v1
+        uses: extractions/setup-just@v4
+
+      - name: Install Linux dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            pkg-config \
+            libavcodec-dev \
+            libavformat-dev \
+            libavutil-dev \
+            libavfilter-dev \
+            libswscale-dev \
+            libva-dev \
+            libva-drm2
+
+      - name: Format check
+        run: cargo fmt --check
 
       - name: Build
         run: just ${{ matrix.just-target }}
 
-      - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.name }}
-          path: ${{ matrix.artifacts }}
+          path: ${{ matrix.artifact }}
           retention-days: 7

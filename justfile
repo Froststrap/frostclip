@@ -1,37 +1,42 @@
-APP_WIN := "frostclip.exe"
-APP_LINUX := "frostclip-linux"
-APP_MAC := "frostclip-macos"
+APP := "frostclip"
+BUILD_DIR := "build"
 
-# Windows builds
-windows-dev:
-    go build -o {{ APP_WIN }} .
+prepare:
+    mkdir -p {{BUILD_DIR}}
 
-windows-release:
-    rsrc -ico froststrap.ico -o frostclip.syso
-    go build -ldflags="-s -w -H windowsgui" -o {{ APP_WIN }} .
-    upx --best {{ APP_WIN }}
+windows-dev: prepare
+    cargo build --bin {{APP}}
+    cp target/debug/{{APP}}.exe {{BUILD_DIR}}/{{APP}}-windows-dev.exe
 
-# Linux builds
-linux-dev:
-    GOOS=linux GOARCH=amd64 go build -o {{ APP_LINUX }} .
+linux-dev: prepare
+    cargo build --bin {{APP}}
+    cp target/debug/{{APP}} {{BUILD_DIR}}/{{APP}}-linux-dev
 
-linux-release:
-    GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o {{ APP_LINUX }} .
-    upx --best {{ APP_LINUX }}
+mac-dev: prepare
+    cargo build --bin {{APP}}
+    cp target/debug/{{APP}} {{BUILD_DIR}}/{{APP}}-mac-dev
 
-# macOS builds (must run natively on MacOS)
-mac-dev:
-    go build -o {{ APP_MAC }} .
+windows-release: prepare
+    cargo build --release --bin {{APP}}
+    cp target/release/{{APP}}.exe {{BUILD_DIR}}/{{APP}}-windows.exe
 
-mac-release-arm64:
-    go build -ldflags="-s -w" -o {{ APP_MAC }}-arm64 .
+linux-release: prepare
+    cargo build --release --bin {{APP}}
+    cp target/release/{{APP}} {{BUILD_DIR}}/{{APP}}-linux
 
-mac-release-amd64:
-    CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 CGO_CFLAGS="-arch x86_64" CGO_LDFLAGS="-arch x86_64" go build -ldflags="-s -w" -o {{ APP_MAC }}-amd64 .
+mac-release: prepare
+    cargo build --release --bin {{APP}}
+    cp target/release/{{APP}} {{BUILD_DIR}}/{{APP}}-mac
 
-mac-release:
-    just mac-release-arm64
-    just mac-release-amd64
+check:
+    cargo check
+
+lint:
+    cargo clippy -- -D warnings
+
+fmt:
+    cargo fmt
 
 clean:
-    rm -f ./frostclip-linux ./frostclip-macos-arm64 ./frostclip-macos-amd64 ./frostclip.exe ./frostclip.syso
+    cargo clean
+    rm -rf {{BUILD_DIR}}

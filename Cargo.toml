@@ -7,7 +7,7 @@ edition = "2024"
 crate-type = ["cdylib", "rlib"]
 
 [[bin]]
-name = "test"
+name = "frostclip"
 path = "src/bin/test.rs"
 
 [dependencies]
