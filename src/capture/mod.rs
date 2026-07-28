@@ -2,11 +2,7 @@ use anyhow::Result;
 
 use crate::frame::VideoFrame;
 
-#[cfg(target_os = "linux")]
 pub mod linux;
-
-#[cfg(target_os = "linux")]
-use linux::LinuxCapture;
 
 #[derive(Debug, Clone)]
 pub struct CaptureInfo {
@@ -28,17 +24,9 @@ pub struct Capture {
 
 impl Capture {
     pub fn new() -> Result<Self> {
-        #[cfg(target_os = "linux")]
-        {
-            Ok(Self {
-                backend: Box::new(LinuxCapture::new()?),
-            })
-        }
-
-        #[cfg(not(target_os = "linux"))]
-        {
-            compile_error!("Unsupported platform");
-        }
+        Ok(Self {
+            backend: Box::new(linux::LinuxCapture::new()?),
+        })
     }
 
     pub fn start(&mut self, callback: Box<dyn Fn(VideoFrame) + Send + Sync>) -> Result<()> {

@@ -22,6 +22,7 @@
   glib,
   just,
   create-dmg,
+  ffmpeg-full,
   inputs,
 }:
 let
@@ -57,6 +58,8 @@ craneLib.devShell rec {
   ];
 
   buildInputs = [
+    pkg-config
+    ffmpeg-full
     clang
     just
   ]
@@ -65,13 +68,6 @@ craneLib.devShell rec {
   ]
   ++ lib.optionals stdenv.isLinux [
     glib
-  ];
-
-  nativeBuildInputs = lib.optionals stdenv.isLinux [
-    pkg-config
-    libxcb
-    libxcb-util
-    libxkbcommon
   ];
 
   LD_LIBRARY_PATH = lib.makeLibraryPath runtimeLibs;
