@@ -17,7 +17,7 @@ pub struct CaptureEngine {
     encoder: Arc<Mutex<Box<dyn Encoder>>>,
     buffer: Arc<Mutex<ReplayBuffer>>,
     config: Config,
-    running: bool,
+    running: Arc<Mutex<bool>>,
 }
 
 impl CaptureEngine {
@@ -68,7 +68,7 @@ impl CaptureEngine {
             encoder: Arc::new(Mutex::new(encoder)),
             buffer: Arc::new(Mutex::new(buffer)),
             config,
-            running: false,
+            running: Arc::new(Mutex::new(false)),
         })
     }
 
@@ -77,23 +77,28 @@ impl CaptureEngine {
 
         let encoder = Arc::clone(&self.encoder);
         let buffer = Arc::clone(&self.buffer);
+        let running = Arc::clone(&self.running);
+
+        *running.lock().unwrap() = true;
 
         self.capture.start(Box::new(move |frame| {
+            if !*running.lock().unwrap() {
+                debug!("ENGINE: ignoring frame after stop");
+                return;
+            }
+
             debug!("ENGINE: frame callback received");
 
             let packets = match encoder.lock().unwrap().submit(frame) {
-                Ok(packets) => {
-                    debug!("ENGINE: encoder produced {} packets", packets.len());
+                Ok(packets) => packets,
 
-                    packets
-                }
-
-                Err(err) => {
-                    error!("ENGINE: encoder submit failed {:?}", err);
-
+                Err(_) => {
+                    error!("ENGINE: encoder submit failed");
                     return;
                 }
             };
+
+            debug!("ENGINE: encoder produced {} packets", packets.len());
 
             let mut buffer = buffer.lock().unwrap();
 
@@ -102,13 +107,12 @@ impl CaptureEngine {
                     "ENGINE: pushing packet pts={} dts={} keyframe={}",
                     packet.pts, packet.dts, packet.is_keyframe
                 );
+
                 buffer.push(packet);
             }
 
             debug!("ENGINE: replay buffer size={}", buffer.len());
         }))?;
-
-        self.running = true;
 
         info!("ENGINE: capture started");
 
@@ -118,11 +122,21 @@ impl CaptureEngine {
     pub fn stop(&mut self) -> Result<(), ()> {
         info!("ENGINE: stopping capture");
 
+        *self.running.lock().unwrap() = false;
         self.capture.stop()?;
 
-        std::thread::sleep(std::time::Duration::from_millis(500));
+        let packets = self.encoder.lock().unwrap().flush()?;
 
-        self.running = false;
+        let mut buffer = self.buffer.lock().unwrap();
+
+        for packet in packets {
+            debug!(
+                "ENGINE: flushing packet pts={} dts={} keyframe={}",
+                packet.pts, packet.dts, packet.is_keyframe
+            );
+
+            buffer.push(packet);
+        }
 
         info!("ENGINE: capture stopped");
 
@@ -130,7 +144,7 @@ impl CaptureEngine {
     }
 
     pub fn is_running(&self) -> bool {
-        self.running
+        *self.running.lock().unwrap()
     }
 
     pub fn submit_frame(&mut self, frame: VideoFrame) -> Result<(), ()> {
@@ -214,5 +228,26 @@ impl CaptureEngine {
         info!("ENGINE: wrote {:?}", path);
 
         Ok(path.to_string_lossy().to_string())
+    }
+
+    fn drain_encoder(&self) -> Result<(), ()> {
+        let packets = self.encoder.lock().unwrap().flush()?;
+
+        if packets.is_empty() {
+            return Ok(());
+        }
+
+        let mut buffer = self.buffer.lock().unwrap();
+
+        for packet in packets {
+            debug!(
+                "ENGINE: flushing packet pts={} dts={} keyframe={}",
+                packet.pts, packet.dts, packet.is_keyframe
+            );
+
+            buffer.push(packet);
+        }
+
+        Ok(())
     }
 }

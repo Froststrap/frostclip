@@ -41,7 +41,7 @@ impl VaapiEncoder {
     pub fn new(width: u32, height: u32) -> Result<Self, ()> {
         ffmpeg::init().unwrap();
 
-        let hw = VaapiHardware::new("/dev/dri/renderD128", width, height).unwrap();
+        let hw = VaapiHardware::new("/dev/dri/renderD128", width, height).map_err(|_| ())?;
 
         let codec = ffmpeg::encoder::find_by_name("h264_vaapi").expect("h264_vaapi missing");
 
@@ -67,12 +67,11 @@ impl VaapiEncoder {
         options.set("g", "12");
 
         let encoder = encoder.open_with(options).unwrap();
+
         info!(
-            "VAAPI encoder opened: time_base={}/{} framerate={}/{}",
+            "VAAPI encoder opened timebase={}/{}",
             encoder.time_base().numerator(),
-            encoder.time_base().denominator(),
-            encoder.frame_rate().numerator(),
-            encoder.frame_rate().denominator()
+            encoder.time_base().denominator()
         );
 
         let scaler = SendScaler(
@@ -88,17 +87,55 @@ impl VaapiEncoder {
             .unwrap(),
         );
 
-        info!("VAAPI: encoder initialized {}x{}", width, height);
-
         Ok(Self {
             width,
             height,
-            last_packet_pts: None,
             frame_count: 0,
+            last_packet_pts: None,
             encoder,
             scaler,
             hw,
         })
+    }
+
+    pub fn drain(&mut self) -> Vec<EncodedPacket> {
+        let mut packets = Vec::new();
+
+        loop {
+            let mut packet = ffmpeg::Packet::empty();
+
+            if self.encoder.receive_packet(&mut packet).is_err() {
+                break;
+            }
+
+            let pts = packet.pts().unwrap_or(0);
+            let dts = packet.dts().unwrap_or(pts);
+
+            let duration = match self.last_packet_pts {
+                Some(last) => pts - last,
+                None => 1,
+            };
+
+            self.last_packet_pts = Some(pts);
+
+            info!(
+                "VAAPI output packet pts={} dts={} duration={} key={}",
+                pts,
+                dts,
+                duration,
+                packet.is_key()
+            );
+
+            packets.push(EncodedPacket {
+                data: packet.data().unwrap_or(&[]).to_vec(),
+                pts,
+                dts,
+                duration,
+                is_keyframe: packet.is_key(),
+            });
+        }
+
+        packets
     }
 }
 
@@ -114,9 +151,7 @@ impl Encoder for VaapiEncoder {
                 timestamp,
             } => (data, width, height, stride, format, timestamp),
 
-            VideoFrame::LinuxDmaBuf(_) => {
-                return Err(());
-            }
+            VideoFrame::LinuxDmaBuf(_) => return Err(()),
         };
 
         if format != VideoFormat::Rgba {
@@ -144,123 +179,32 @@ impl Encoder for VaapiEncoder {
         let mut hw_frame = ffmpeg::util::frame::video::Video::empty();
 
         unsafe {
-            let ret = av_hwframe_get_buffer(self.hw.frames_ctx(), hw_frame.as_mut_ptr(), 0);
-
-            if ret < 0 {
-                eprintln!("av_hwframe_get_buffer failed {ret}");
+            if av_hwframe_get_buffer(self.hw.frames_ctx(), hw_frame.as_mut_ptr(), 0) < 0 {
                 return Err(());
             }
 
-            let ret = av_hwframe_transfer_data(hw_frame.as_mut_ptr(), nv12.as_ptr(), 0);
-
-            if ret < 0 {
-                eprintln!("av_hwframe_transfer_data failed {ret}");
+            if av_hwframe_transfer_data(hw_frame.as_mut_ptr(), nv12.as_ptr(), 0) < 0 {
                 return Err(());
             }
 
-            let pts = timestamp as i64;
-
-            (*hw_frame.as_mut_ptr()).pts = pts;
-
-            info!("VAAPI timestamp={}us converted_pts={}", timestamp, pts);
+            (*hw_frame.as_mut_ptr()).pts = timestamp as i64;
         }
 
-        info!(
-            "VAAPI submit frame {}x{} timestamp={}",
-            width, height, timestamp
-        );
+        self.encoder.send_frame(&hw_frame).map_err(|_| ())?;
 
-        self.encoder.send_frame(&hw_frame).unwrap();
-
-        let mut packets = Vec::new();
-
-        loop {
-            let mut packet = ffmpeg::Packet::empty();
-
-            match self.encoder.receive_packet(&mut packet) {
-                Ok(_) => {
-                    info!(
-                        "VAAPI packet size={} pts={:?} dts={:?} duration={} keyframe={} encoder_timebase={}/{}",
-                        packet.size(),
-                        packet.pts(),
-                        packet.dts(),
-                        packet.duration(),
-                        packet.is_key(),
-                        self.encoder.time_base().numerator(),
-                        self.encoder.time_base().denominator(),
-                    );
-
-                    let pts = packet.pts().unwrap_or(0);
-                    let dts = packet.dts().unwrap_or(pts);
-
-                    let duration = match self.last_packet_pts {
-                        Some(last) => pts - last,
-                        None => 0,
-                    };
-
-                    self.last_packet_pts = Some(pts);
-
-                    packets.push(EncodedPacket {
-                        data: packet.data().unwrap_or(&[]).to_vec(),
-
-                        pts,
-                        dts,
-                        duration,
-
-                        is_keyframe: packet.is_key(),
-                    });
-                }
-
-                Err(_) => {
-                    break;
-                }
-            }
-        }
-
-        info!("FRAME COUNT {}", self.frame_count);
         self.frame_count += 1;
 
-        Ok(packets)
+        Ok(self.drain())
     }
 
     fn flush(&mut self) -> Result<Vec<EncodedPacket>, ()> {
-        let mut packets = Vec::new();
+        info!("VAAPI flushing encoder");
 
-        self.encoder.send_eof().unwrap();
+        self.encoder.send_eof().map_err(|_| ())?;
 
-        loop {
-            let mut packet = ffmpeg::Packet::empty();
+        let packets = self.drain();
 
-            match self.encoder.receive_packet(&mut packet) {
-                Ok(_) => {
-                    let pts = packet.pts().unwrap_or(0);
-                    let dts = packet.dts().unwrap_or(pts);
-
-                    let duration = match self.last_packet_pts {
-                        Some(last) => pts - last,
-                        None => 0,
-                    };
-
-                    self.last_packet_pts = Some(pts);
-
-                    packets.push(EncodedPacket {
-                        data: packet.data().unwrap_or(&[]).to_vec(),
-
-                        pts,
-                        dts,
-                        duration,
-
-                        is_keyframe: packet.is_key(),
-                    });
-                }
-
-                Err(_) => {
-                    break;
-                }
-            }
-        }
-
-        info!("VAAPI flush complete packets={}", packets.len());
+        info!("VAAPI flush returned {} packets", packets.len());
 
         Ok(packets)
     }
@@ -269,15 +213,7 @@ impl Encoder for VaapiEncoder {
         let extradata =
             unsafe { extract_codec_parameters(self.encoder.as_ptr()).unwrap_or_default() };
 
-        info!("H264 extradata size={}", extradata.len());
-
         let tb = self.encoder.time_base();
-
-        info!(
-            "VIDEO INFO: encoder timebase={}/{}",
-            tb.numerator(),
-            tb.denominator()
-        );
 
         Some(VideoInfo {
             width: self.width,
