@@ -7,7 +7,9 @@ edition = "2024"
 ffmpeg-sys-next = "8.1"
 ffmpeg-next = "8.1"
 tracing = "0.1.44"
-xcap = "0.9.7"
+
+pipewire = "0.10"
+libspa = "0.10"
 
 [dependencies.logging_subscriber]
 git = "https://gitlab.com/invra/logging_subscriber"
