@@ -21,14 +21,14 @@ pub struct CaptureEngine {
 }
 
 impl CaptureEngine {
-    pub fn new(config: Config) -> Result<Self, ()> {
+    pub async fn new(config: Config) -> Result<Self, ()> {
         info!("ENGINE: creating capture engine");
 
         config.ensure_output_dir().unwrap();
 
         info!("ENGINE: output directory {:?}", config.output_dir);
 
-        let capture = Capture::new().unwrap();
+        let capture = Capture::new().await?;
         let capture_info = capture.info();
 
         info!("ENGINE: capture backend created");

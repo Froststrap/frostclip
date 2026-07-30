@@ -11,6 +11,14 @@ tracing = "0.1.44"
 pipewire = "0.10"
 libspa = "0.10"
 
+[dependencies.ashpd]
+version = "0.13.13"
+features = ["screencast", "tokio"]
+
+[dependencies.tokio]
+version = "1.53.1"
+features = ["rt"]
+
 [dependencies.logging_subscriber]
 git = "https://gitlab.com/invra/logging_subscriber"
 

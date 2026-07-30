@@ -21,9 +21,9 @@ pub struct Capture {
 }
 
 impl Capture {
-    pub fn new() -> Result<Self, ()> {
+    pub async fn new() -> Result<Self, ()> {
         Ok(Self {
-            backend: Box::new(linux::LinuxCapture::new()?),
+            backend: Box::new(linux::LinuxCapture::new(None).await?),
         })
     }
 
