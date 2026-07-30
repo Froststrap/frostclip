@@ -38,7 +38,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let clip_seconds = config.default_clip_seconds;
 
-    let state = AppState::default();
+    let state = AppState::load().unwrap_or_default();
 
     let mut engine = CaptureEngine::new(config, state)
         .await
