@@ -14,6 +14,8 @@
   vulkan-loader,
   wayland,
   libxkbcommon,
+  pipewire,
+  llvmPackages,
   pkg-config,
   libxcb,
   libxcb-util,
@@ -55,6 +57,8 @@ craneLib.devShell rec {
     libxcursor
     libxcb
     libxcb-util
+    ffmpeg-full
+    pipewire
   ];
 
   buildInputs = [
@@ -68,7 +72,10 @@ craneLib.devShell rec {
   ]
   ++ lib.optionals stdenv.isLinux [
     glib
+    pipewire
+    llvmPackages.libclang
   ];
 
+  LIBCLANG_PATH = "${llvmPackages.libclang.lib}/lib";
   LD_LIBRARY_PATH = lib.makeLibraryPath runtimeLibs;
 }
