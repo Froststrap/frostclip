@@ -1,31 +1,38 @@
-[package]
-name = "frostclip"
+[workspace]
+resolver = "3"
+members = ["frostclip"]
+default-members = ["frostclip"]
+
+[workspace.package]
 version = "0.0.1"
 edition = "2024"
+license = "GPL-3.0"
+authors = [
+  "UltimatePlayer97 <gogole.help134@gmail.com>",
+  "Invra <identificationsucks@gmail.com>"
+]
 
-[dependencies]
+[workspace.dependencies]
 dirs = "6.0"
 toml = "1.1.4"
-
 ffmpeg-sys-next = "8.1"
 ffmpeg-next = "8.1"
 tracing = "0.1.44"
-
 pipewire = "0.10"
 libspa = "0.10"
 
-[dependencies.ashpd]
+[workspace.dependencies.ashpd]
 version = "0.13.13"
 features = ["screencast", "tokio"]
 
-[dependencies.tokio]
+[workspace.dependencies.tokio]
 version = "1.53.1"
 features = ["rt"]
 
-[dependencies.logging_subscriber]
+[workspace.dependencies.logging_subscriber]
 git = "https://gitlab.com/invra/logging_subscriber"
 
-[dependencies.chrono]
+[workspace.dependencies.chrono]
 version = "0.4.45"
 default-features = false
 features = [
@@ -33,6 +40,6 @@ features = [
   "clock",
 ]
 
-[dependencies.serde]
+[workspace.dependencies.serde]
 version = "1.0.229"
 features = ["derive"]
