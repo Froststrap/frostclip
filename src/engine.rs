@@ -4,7 +4,7 @@ use tracing::{debug, error, info};
 
 use crate::buffer::ReplayBuffer;
 use crate::capture::Capture;
-use crate::config::Config;
+use crate::config::{AppState, Config};
 use crate::encoder::{
     Encoder,
     factory::{EncoderConfig, create_encoder},
@@ -17,18 +17,19 @@ pub struct CaptureEngine {
     encoder: Arc<Mutex<Box<dyn Encoder>>>,
     buffer: Arc<Mutex<ReplayBuffer>>,
     config: Config,
+    state: AppState,
     running: Arc<Mutex<bool>>,
 }
 
 impl CaptureEngine {
-    pub async fn new(config: Config) -> Result<Self, ()> {
+    pub async fn new(config: Config, mut state: AppState) -> Result<Self, ()> {
         info!("ENGINE: creating capture engine");
 
         config.ensure_output_dir().unwrap();
 
         info!("ENGINE: output directory {:?}", config.output_dir);
 
-        let capture = Capture::new().await?;
+        let capture = Capture::new(&mut state).await?;
         let capture_info = capture.info();
 
         info!("ENGINE: capture backend created");
@@ -68,6 +69,7 @@ impl CaptureEngine {
             encoder: Arc::new(Mutex::new(encoder)),
             buffer: Arc::new(Mutex::new(buffer)),
             config,
+            state,
             running: Arc::new(Mutex::new(false)),
         })
     }

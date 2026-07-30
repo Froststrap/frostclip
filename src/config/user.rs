@@ -1,6 +1,7 @@
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Config {
     pub width: u32,
     pub height: u32,
@@ -64,5 +65,25 @@ impl Default for Config {
 
             output_dir: PathBuf::from("./clips"),
         }
+    }
+}
+
+impl Config {
+    pub fn save(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let contents = toml::to_string_pretty(self)?;
+
+        crate::config::filesystem::write_file(
+            &crate::config::filesystem::user_config_file(),
+            &contents,
+        )?;
+
+        Ok(())
+    }
+
+    pub fn load() -> Result<Self, Box<dyn std::error::Error>> {
+        let contents =
+            crate::config::filesystem::read_file(&crate::config::filesystem::user_config_file())?;
+
+        Ok(toml::from_str(&contents)?)
     }
 }

@@ -7,7 +7,7 @@ pub mod frame;
 pub mod muxer;
 pub mod portal;
 
-use config::Config;
+use config::{AppState, Config};
 use engine::CaptureEngine;
 
 use std::fs;
@@ -38,7 +38,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let clip_seconds = config.default_clip_seconds;
 
-    let mut engine = CaptureEngine::new(config)
+    let state = AppState::default();
+
+    let mut engine = CaptureEngine::new(config, state)
         .await
         .map_err(|_| "Failed to create capture engine")?;
 

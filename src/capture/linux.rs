@@ -6,20 +6,36 @@ use tracing::{error, info};
 
 pub struct LinuxCapture {
     portal: Option<PortalStream>,
+    restore_token: Option<String>,
     main_loop: Option<pw::main_loop::MainLoopRc>,
     thread_handle: Option<std::thread::JoinHandle<()>>,
 }
 
 impl LinuxCapture {
-    pub async fn new(restore_token: Option<&str>) -> Result<Self, ()> {
+    pub async fn new(
+        restore_token: Option<&str>,
+        state: &mut crate::config::AppState,
+    ) -> Result<Self, ()> {
         let portal = crate::portal::screencast::create(restore_token)
             .await
             .map_err(|err| {
                 error!("PORTAL creation failed: {}", err);
             })?;
 
+        let restore_token = portal.restore_token.clone();
+        if let Some(token) = &restore_token {
+            state.set_session_token(token.clone());
+
+            if let Err(err) = state.save() {
+                error!("STATE: failed to save restore token: {}", err);
+            } else {
+                info!("STATE: saved restore token");
+            }
+        }
+
         Ok(Self {
             portal: Some(portal),
+            restore_token,
             main_loop: None,
             thread_handle: None,
         })
