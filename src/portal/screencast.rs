@@ -3,6 +3,7 @@ use ashpd::desktop::{
     screencast::{CursorMode, Screencast, SelectSourcesOptions, SourceType},
 };
 use std::os::fd::OwnedFd;
+use tracing::info;
 
 #[derive(Debug)]
 pub struct PortalStream {
@@ -35,6 +36,9 @@ pub async fn create(saved_restore_token: Option<&str>) -> ashpd::Result<PortalSt
     let response = request.response()?;
 
     let new_restore_token = response.restore_token().map(|t| t.to_string());
+    if new_restore_token.is_some() {
+        info!("PORTAL: received restore token");
+    }
 
     let pipewire_fd = screencast
         .open_pipe_wire_remote(&session, Default::default())
