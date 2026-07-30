@@ -1,4 +1,7 @@
 use serde::{Deserialize, Serialize};
+use tracing::{debug, info, warn};
+
+use crate::config::filesystem;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct AppState {
@@ -17,14 +20,16 @@ impl AppState {
     pub fn save(&self) -> Result<(), Box<dyn std::error::Error>> {
         let contents = toml::to_string_pretty(self)?;
 
-        crate::config::filesystem::write_file(&crate::config::filesystem::state_file(), &contents)?;
+        filesystem::write_file(&filesystem::state_file(), &contents)?;
+        info!("STATE: saved to {:?}", filesystem::state_file());
 
         Ok(())
     }
 
     pub fn load() -> Result<Self, Box<dyn std::error::Error>> {
-        let contents =
-            crate::config::filesystem::read_file(&crate::config::filesystem::state_file())?;
+        let contents = filesystem::read_file(&filesystem::state_file())?;
+
+        info!("STATE: loaded from {:?}", filesystem::state_file());
 
         Ok(toml::from_str(&contents)?)
     }
