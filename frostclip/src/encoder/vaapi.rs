@@ -59,11 +59,11 @@ impl VaapiEncoder {
 
         encoder.set_format(ffmpeg::format::Pixel::VAAPI);
 
-        //// VBR rate control targeting bitrate_kbps.
-        ////   maxrate = 1.5x (burst ceiling for complex scenes)
-        ////   bufsize = 2x (VBV buffer, standard sizing)
-        ////   bf = 0 (no B-frames, keeps replay latency low)
-        ////   g = framerate (keyframe about every ~1 second)
+        // VBR rate control targeting bitrate_kbps.
+        //   maxrate = 1.5x (burst ceiling for complex scenes)
+        //   bufsize = 2x (VBV buffer, standard sizing)
+        //   bf = 0 (no B-frames, keeps replay latency low)
+        //   g = framerate (keyframe about every ~1 second)
         let maxrate = bitrate_kbps * 3 / 2;
         let bufsize = bitrate_kbps * 2;
 

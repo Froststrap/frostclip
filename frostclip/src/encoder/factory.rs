@@ -1,6 +1,8 @@
 use tracing::{info, warn};
 
-use crate::encoder::{Encoder, software::SoftwareEncoder, vaapi::VaapiEncoder};
+use crate::encoder::{
+    Encoder, nvenc::NvencEncoder, software::SoftwareEncoder, vaapi::VaapiEncoder,
+};
 
 #[derive(Debug, Clone, Copy)]
 pub struct EncoderConfig {
@@ -15,6 +17,25 @@ pub struct EncoderConfig {
 }
 
 pub fn create_encoder(config: EncoderConfig) -> Result<Box<dyn Encoder>, ()> {
+    if NvencEncoder::probe() {
+        info!("Using NVENC encoder");
+
+        match NvencEncoder::new(
+            config.output_width,
+            config.output_height,
+            config.framerate,
+            config.bitrate_kbps,
+        ) {
+            Ok(encoder) => {
+                return Ok(Box::new(encoder));
+            }
+
+            Err(err) => {
+                warn!("NVENC init failed {:?}, falling back", err);
+            }
+        }
+    }
+
     if VaapiEncoder::probe() {
         info!("Using VAAPI encoder");
 

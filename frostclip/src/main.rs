@@ -6,6 +6,7 @@ pub mod engine;
 pub mod frame;
 pub mod muxer;
 pub mod portal;
+pub mod startup;
 
 use config::{AppState, Config};
 use engine::CaptureEngine;
@@ -18,13 +19,15 @@ use tracing::{debug, info};
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::subscriber::set_global_default(logging_subscriber::SimpleSubscriber)?;
 
+    startup::run().map_err(|e| format!("Startup check failed: {}", e))?;
+
     let runtime = tokio::runtime::Runtime::new()?;
 
     runtime.block_on(async { run().await })
 }
 
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
-    info!("Starting");
+    info!("Starting capture pipeline");
 
     if Path::new("./clips").exists() {
         debug!("Cleaning up existing clips directory...");

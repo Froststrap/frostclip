@@ -49,12 +49,12 @@ impl SoftwareEncoder {
         encoder.set_format(ffmpeg::format::Pixel::YUV420P);
         encoder.set_max_b_frames(0);
 
-        //// ABR-style bitrate targeting (x264 doesn't have distinct VBR/CBR modes
-        //// like VAAPI. Setting bitrate + maxrate + bufsize gives you VBR behavior).
-        ////   bit_rate  = target average
-        ////   maxrate   = 1.5x for burst headroom on complex frames
-        ////   bufsize   = 2x for VBV constraint window
-        ////   gop_size  = framerate (keyframe about every ~1 second)
+        // ABR-style bitrate targeting (x264 doesn't have distinct VBR/CBR modes
+        // like VAAPI. Setting bitrate + maxrate + bufsize gives you VBR behavior).
+        //   bit_rate  = target average
+        //   maxrate   = 1.5x for burst headroom on complex frames
+        //   bufsize   = 2x for VBV constraint window
+        //   gop_size  = framerate (keyframe about every ~1 second)
         let bit_rate = (bitrate_kbps as usize) * 1000;
         let max_rate = bit_rate * 3 / 2;
         let buf_size = bit_rate * 2;

@@ -3,6 +3,7 @@ use ffmpeg_sys_next as ffi;
 
 pub mod factory;
 pub mod nvenc;
+pub mod nvenc_hw;
 pub mod software;
 pub mod vaapi;
 pub mod vaapi_hw;
