@@ -38,7 +38,7 @@ impl VaapiEncoder {
         }
     }
 
-    pub fn new(width: u32, height: u32) -> Result<Self, ()> {
+    pub fn new(width: u32, height: u32, framerate: u32, bitrate_kbps: u32) -> Result<Self, ()> {
         ffmpeg::init().unwrap();
 
         let hw = VaapiHardware::new("/dev/dri/renderD128", width, height).map_err(|_| ())?;
@@ -59,12 +59,26 @@ impl VaapiEncoder {
 
         encoder.set_format(ffmpeg::format::Pixel::VAAPI);
 
-        let mut options = ffmpeg::Dictionary::new();
+        //// VBR rate control targeting bitrate_kbps.
+        ////   maxrate = 1.5x (burst ceiling for complex scenes)
+        ////   bufsize = 2x (VBV buffer, standard sizing)
+        ////   bf = 0 (no B-frames, keeps replay latency low)
+        ////   g = framerate (keyframe about every ~1 second)
+        let maxrate = bitrate_kbps * 3 / 2;
+        let bufsize = bitrate_kbps * 2;
 
-        options.set("rc_mode", "ICQ");
-        options.set("qp", "20");
+        let mut options = ffmpeg::Dictionary::new();
+        options.set("rc_mode", "VBR");
+        options.set("b", &format!("{}k", bitrate_kbps));
+        options.set("maxrate", &format!("{}k", maxrate));
+        options.set("bufsize", &format!("{}k", bufsize));
         options.set("bf", "0");
-        options.set("g", "12");
+        options.set("g", &format!("{}", framerate));
+
+        info!(
+            "VAAPI: opening encoder rc=VBR bitrate={}k maxrate={}k bufsize={}k gop={}",
+            bitrate_kbps, maxrate, bufsize, framerate
+        );
 
         let encoder = encoder.open_with(options).unwrap();
 

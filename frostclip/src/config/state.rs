@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use tracing::{debug, info, warn};
+use tracing::info;
 
 use crate::config::filesystem;
 

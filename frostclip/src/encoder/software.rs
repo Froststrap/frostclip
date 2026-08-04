@@ -32,6 +32,7 @@ impl SoftwareEncoder {
         output_width: u32,
         output_height: u32,
         framerate: u32,
+        bitrate_kbps: u32,
     ) -> Result<Self, ()> {
         ffmpeg::init().unwrap();
 
@@ -48,9 +49,36 @@ impl SoftwareEncoder {
         encoder.set_format(ffmpeg::format::Pixel::YUV420P);
         encoder.set_max_b_frames(0);
 
+        //// ABR-style bitrate targeting (x264 doesn't have distinct VBR/CBR modes
+        //// like VAAPI. Setting bitrate + maxrate + bufsize gives you VBR behavior).
+        ////   bit_rate  = target average
+        ////   maxrate   = 1.5x for burst headroom on complex frames
+        ////   bufsize   = 2x for VBV constraint window
+        ////   gop_size  = framerate (keyframe about every ~1 second)
+        let bit_rate = (bitrate_kbps as usize) * 1000;
+        let max_rate = bit_rate * 3 / 2;
+        let buf_size = bit_rate * 2;
+
+        encoder.set_bit_rate(bit_rate);
+        encoder.set_max_bit_rate(max_rate);
+        encoder.set_gop(framerate);
+
+        // bufsize isn't exposed on the safe wrapper
+        unsafe {
+            (*encoder.as_mut_ptr()).rc_buffer_size = buf_size as i32;
+        }
+
         let mut options = ffmpeg::Dictionary::new();
         options.set("preset", "veryfast");
         options.set("tune", "zerolatency");
+
+        info!(
+            "SW: opening libx264 bitrate={}k maxrate={}k bufsize={}k gop={}",
+            bitrate_kbps,
+            max_rate / 1000,
+            buf_size / 1000,
+            framerate
+        );
 
         let encoder = encoder.open_with(options).unwrap();
 
@@ -67,9 +95,9 @@ impl SoftwareEncoder {
             .unwrap(),
         );
 
-        println!(
-            "H264 initialized input={}x{} output={}x{}",
-            input_width, input_height, output_width, output_height
+        info!(
+            "SW: initialized input={}x{} output={}x{} fps={}",
+            input_width, input_height, output_width, output_height, framerate
         );
 
         Ok(Self {
@@ -174,7 +202,7 @@ impl Encoder for SoftwareEncoder {
         let extradata =
             unsafe { extract_codec_parameters(self.encoder.as_ptr()).unwrap_or_default() };
 
-        info!("H264 extradata size={}", extradata.len());
+        info!("SW: extradata size={}", extradata.len());
 
         Some(VideoInfo {
             width: self.output_width,
