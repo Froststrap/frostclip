@@ -25,6 +25,11 @@
   just,
   create-dmg,
   ffmpeg-full,
+  libva,
+  mesa,
+  intel-media-driver,
+  intel-vaapi-driver,
+  nvidia-vaapi-driver,
   inputs,
 }:
 let
@@ -59,6 +64,11 @@ craneLib.devShell rec {
     libxcb-util
     ffmpeg-full
     pipewire
+    libva
+    mesa
+    intel-media-driver
+    intel-vaapi-driver
+    nvidia-vaapi-driver
   ];
 
   buildInputs = [
@@ -77,5 +87,13 @@ craneLib.devShell rec {
   ];
 
   LIBCLANG_PATH = "${llvmPackages.libclang.lib}/lib";
-  LD_LIBRARY_PATH = lib.makeLibraryPath runtimeLibs;
+  LD_LIBRARY_PATH =
+    lib.makeLibraryPath runtimeLibs
+    + lib.optionalString stdenv.isLinux ":/run/opengl-driver/lib";
+  LIBVA_DRIVERS_PATH = lib.makeSearchPath "lib/dri" [
+    mesa
+    intel-media-driver
+    intel-vaapi-driver
+    nvidia-vaapi-driver
+  ];
 }
