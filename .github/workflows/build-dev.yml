@@ -50,6 +50,9 @@ jobs:
             libavfilter-dev \
             libswscale-dev \
             libva-dev \
+            libpipewire-0.3-dev \
+            libspa-0.2-dev \
+            libclang-dev \
             libva-drm2
 
       - name: Format check
