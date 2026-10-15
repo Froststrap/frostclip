@@ -6,25 +6,7 @@ on:
 
 jobs:
   dev:
-    strategy:
-      matrix:
-        include:
-          - os: windows-latest
-            just-target: windows-dev
-            artifact: build/frostclip-windows-dev.exe
-            name: frostclip-dev-windows
-
-          - os: ubuntu-latest
-            just-target: linux-dev
-            artifact: build/frostclip-linux-dev
-            name: frostclip-dev-linux
-
-          - os: macos-latest
-            just-target: mac-dev
-            artifact: build/frostclip-mac-dev
-            name: frostclip-dev-mac
-
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-26.04
 
     steps:
       - uses: actions/checkout@v7
@@ -39,7 +21,6 @@ jobs:
         uses: extractions/setup-just@v4
 
       - name: Install Linux dependencies
-        if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt update
           sudo apt install -y \
@@ -50,20 +31,22 @@ jobs:
             libavfilter-dev \
             libswscale-dev \
             libva-dev \
+            libva-drm2 \
             libpipewire-0.3-dev \
             libspa-0.2-dev \
-            libclang-dev \
-            libva-drm2
+            libavdevice-dev \
+            libswresample-dev \
+            libclang-dev
 
       - name: Format check
         run: cargo fmt --check
 
       - name: Build
-        run: just ${{ matrix.just-target }}
+        run: just linux-dev
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.name }}
-          path: ${{ matrix.artifact }}
+          name: frostclip-dev-linux
+          path: build/frostclip-linux-dev
           retention-days: 7

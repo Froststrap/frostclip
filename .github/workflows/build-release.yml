@@ -7,25 +7,7 @@ on:
 
 jobs:
   release:
-    strategy:
-      matrix:
-        include:
-          - os: windows-latest
-            just-target: windows-release
-            artifact: build/frostclip-windows.exe
-            name: frostclip-windows
-
-          - os: ubuntu-latest
-            just-target: linux-release
-            artifact: build/frostclip-linux
-            name: frostclip-linux
-
-          - os: macos-latest
-            just-target: mac-release
-            artifact: build/frostclip-mac
-            name: frostclip-mac
-
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-26.04
 
     steps:
       - uses: actions/checkout@v7
@@ -40,7 +22,6 @@ jobs:
         uses: extractions/setup-just@v4
 
       - name: Install Linux dependencies
-        if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt update
           sudo apt install -y \
@@ -55,21 +36,23 @@ jobs:
             libpipewire-0.3-dev \
             libspa-0.2-dev \
             libclang-dev \
+            libavdevice-dev \
+            libswresample-dev \
             upx
 
       - name: Build
-        run: just ${{ matrix.just-target }}
+        run: just linux-release
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.name }}
-          path: ${{ matrix.artifact }}
+          name: frostclip-linux
+          path: build/frostclip-linux
           retention-days: 30
 
       - name: Upload Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v3
         with:
-          files: ${{ matrix.artifact }}
+          files: build/frostclip-linux
           draft: true
