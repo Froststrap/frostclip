@@ -23,14 +23,13 @@ pub async fn create(saved_restore_token: Option<&str>) -> ashpd::Result<PortalSt
 
     let mut options = SelectSourcesOptions::default()
         .set_cursor_mode(CursorMode::Embedded)
-        .set_sources(SourceType::Monitor | SourceType::Window);
+        .set_sources(SourceType::Monitor | SourceType::Window)
+        .set_persist_mode(PersistMode::ExplicitlyRevoked);
 
     if let Some(token) = saved_restore_token {
         if !token.is_empty() {
             info!("PORTAL: restoring session with token");
-            options = options
-                .set_persist_mode(PersistMode::ExplicitlyRevoked)
-                .set_restore_token(token);
+            options = options.set_restore_token(token);
         }
     }
 
