@@ -333,7 +333,6 @@ dependencies = [
  "dirs",
  "ffmpeg-next",
  "ffmpeg-sys-next",
- "libspa",
  "logging_subscriber",
  "pipewire",
  "serde",

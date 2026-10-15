@@ -1,14 +1,34 @@
 use crate::capture::{CaptureBackend, CaptureInfo};
+use crate::frame::{VideoFormat, VideoFrame};
 use crate::portal::screencast::PortalStream;
 
 use pipewire as pw;
-use tracing::{error, info};
+use pw::spa::param::format::{FormatProperties, MediaSubtype, MediaType};
+use pw::spa::param::format_utils;
+use pw::spa::param::video::{VideoFormat as SpaVideoFormat, VideoInfoRaw};
+use pw::spa::pod::{Pod, object, property};
+use pw::spa::utils::{Fraction, Rectangle};
+use std::time::Instant;
+use tracing::{debug, error, info, warn};
+
+type FrameCallback = Box<dyn Fn(VideoFrame) + Send + Sync>;
+
+struct StreamState {
+    format: VideoInfoRaw,
+    negotiated: bool,
+    callback: FrameCallback,
+    started: Instant,
+    expected: (u32, u32),
+    logged_no_map: bool,
+    frames: u64,
+}
 
 pub struct LinuxCapture {
     portal: Option<PortalStream>,
     restore_token: Option<String>,
-    main_loop: Option<pw::main_loop::MainLoopRc>,
+    quit_sender: Option<pw::channel::Sender<()>>,
     thread_handle: Option<std::thread::JoinHandle<()>>,
+    info: CaptureInfo,
 }
 
 impl LinuxCapture {
@@ -33,19 +53,96 @@ impl LinuxCapture {
             }
         }
 
+        let info = portal
+            .streams
+            .first()
+            .and_then(|stream| stream.size())
+            .map(|(width, height)| CaptureInfo {
+                width: width as u32,
+                height: height as u32,
+            })
+            .unwrap_or(CaptureInfo {
+                width: 0,
+                height: 0,
+            });
+
+        info!("CAPTURE: portal size {}x{}", info.width, info.height);
+
         Ok(Self {
             portal: Some(portal),
             restore_token,
-            main_loop: None,
+            quit_sender: None,
             thread_handle: None,
+            info,
         })
     }
 
-    fn start_capture(
-        &mut self,
-        callback: Box<dyn Fn(crate::frame::VideoFrame) + Send + Sync>,
-    ) -> Result<(), ()> {
+    fn build_format_params() -> Result<Vec<u8>, ()> {
+        let obj = object! {
+            pw::spa::utils::SpaTypes::ObjectParamFormat,
+            pw::spa::param::ParamType::EnumFormat,
+            property!(FormatProperties::MediaType, Id, MediaType::Video),
+            property!(FormatProperties::MediaSubtype, Id, MediaSubtype::Raw),
+            property!(
+                FormatProperties::VideoFormat,
+                Choice,
+                Enum,
+                Id,
+                SpaVideoFormat::BGRx,
+                SpaVideoFormat::BGRx,
+                SpaVideoFormat::BGRA,
+                SpaVideoFormat::RGBx,
+                SpaVideoFormat::RGBA
+            ),
+            property!(
+                FormatProperties::VideoSize,
+                Choice,
+                Range,
+                Rectangle,
+                Rectangle {
+                    width: 1920,
+                    height: 1080
+                },
+                Rectangle {
+                    width: 1,
+                    height: 1
+                },
+                Rectangle {
+                    width: 8192,
+                    height: 8192
+                }
+            ),
+            property!(
+                FormatProperties::VideoFramerate,
+                Choice,
+                Range,
+                Fraction,
+                Fraction { num: 60, denom: 1 },
+                Fraction { num: 0, denom: 1 },
+                Fraction {
+                    num: 1000,
+                    denom: 1
+                }
+            ),
+        };
+
+        pw::spa::pod::serialize::PodSerializer::serialize(
+            std::io::Cursor::new(Vec::new()),
+            &pw::spa::pod::Value::Object(obj),
+        )
+        .map(|(cursor, _)| cursor.into_inner())
+        .map_err(|err| {
+            error!("PIPEWIRE: failed to serialize format params: {:?}", err);
+        })
+    }
+
+    fn start_capture(&mut self, callback: FrameCallback) -> Result<(), ()> {
         let portal = self.portal.take().ok_or(())?;
+        let params_bytes = Self::build_format_params()?;
+        let expected = (self.info.width, self.info.height);
+
+        let (quit_sender, quit_receiver) = pw::channel::channel::<()>();
+        self.quit_sender = Some(quit_sender);
 
         let handle = std::thread::spawn(move || {
             pw::init();
@@ -74,7 +171,7 @@ impl LinuxCapture {
                 }
             };
 
-            let _core = match context.connect_fd_rc(portal.pipewire_fd, None) {
+            let core = match context.connect_fd_rc(portal.pipewire_fd.try_clone().unwrap(), None) {
                 Ok(core) => core,
                 Err(err) => {
                     error!("PIPEWIRE: failed to connect portal fd: {:?}", err);
@@ -84,14 +181,209 @@ impl LinuxCapture {
 
             info!("PIPEWIRE: connected to portal node {}", node_id);
 
-            // TODO:
-            // Create StreamRc here.
+            let quit_loop = main_loop.clone();
+            let _quit_attached = quit_receiver.attach(main_loop.loop_(), move |_| {
+                quit_loop.quit();
+            });
 
-            info!("PIPEWIRE: running main loop");
+            let props = pw::properties::properties! {
+                *pw::keys::MEDIA_TYPE => "Video",
+                *pw::keys::MEDIA_CATEGORY => "Capture",
+                *pw::keys::MEDIA_ROLE => "Screen",
+            };
+
+            let stream = match pw::stream::StreamRc::new(core.clone(), "frostclip-capture", props) {
+                Ok(stream) => stream,
+                Err(err) => {
+                    error!("PIPEWIRE: failed to create stream: {:?}", err);
+                    return;
+                }
+            };
+
+            let state = StreamState {
+                format: VideoInfoRaw::new(),
+                negotiated: false,
+                callback,
+                started: Instant::now(),
+                expected,
+                logged_no_map: false,
+                frames: 0,
+            };
+
+            let _listener = match stream
+                .add_local_listener_with_user_data(state)
+                .state_changed(|_, _, old, new| {
+                    info!("PIPEWIRE: stream state {:?} -> {:?}", old, new);
+                })
+                .param_changed(|_, state, id, param| {
+                    let Some(param) = param else {
+                        return;
+                    };
+
+                    if id != pw::spa::param::ParamType::Format.as_raw() {
+                        return;
+                    }
+
+                    let (media_type, media_subtype) = match format_utils::parse_format(param) {
+                        Ok(v) => v,
+                        Err(_) => return,
+                    };
+
+                    if media_type != MediaType::Video || media_subtype != MediaSubtype::Raw {
+                        return;
+                    }
+
+                    if state.format.parse(param).is_err() {
+                        error!("PIPEWIRE: failed to parse negotiated video format");
+                        return;
+                    }
+
+                    state.negotiated = true;
+
+                    let size = state.format.size();
+                    info!(
+                        "PIPEWIRE: negotiated format={:?} size={}x{}",
+                        state.format.format(),
+                        size.width,
+                        size.height
+                    );
+
+                    if (size.width, size.height) != state.expected {
+                        warn!(
+                            "PIPEWIRE: negotiated size {}x{} differs from portal size {}x{}",
+                            size.width, size.height, state.expected.0, state.expected.1
+                        );
+                    }
+                })
+                .process(|stream, state| {
+                    let Some(mut buffer) = stream.dequeue_buffer() else {
+                        return;
+                    };
+
+                    if !state.negotiated {
+                        return;
+                    }
+
+                    let datas = buffer.datas_mut();
+                    let Some(data) = datas.first_mut() else {
+                        return;
+                    };
+
+                    let chunk_size = data.chunk().size() as usize;
+                    let chunk_offset = data.chunk().offset() as usize;
+                    let chunk_stride = data.chunk().stride();
+
+                    if chunk_size == 0 {
+                        debug!("PIPEWIRE: empty chunk, skipping");
+                        return;
+                    }
+
+                    let Some(bytes) = data.data() else {
+                        if !state.logged_no_map {
+                            warn!("PIPEWIRE: buffer not CPU-mapped (dma-buf?), cannot read");
+                            state.logged_no_map = true;
+                        }
+                        return;
+                    };
+
+                    let size = state.format.size();
+                    let width = size.width as usize;
+                    let height = size.height as usize;
+
+                    if width == 0 || height == 0 {
+                        return;
+                    }
+
+                    let src_stride = if chunk_stride > 0 {
+                        chunk_stride as usize
+                    } else {
+                        width * 4
+                    };
+
+                    let needed = chunk_offset + src_stride * (height - 1) + width * 4;
+                    if bytes.len() < needed {
+                        warn!(
+                            "PIPEWIRE: buffer too small have={} need={}",
+                            bytes.len(),
+                            needed
+                        );
+                        return;
+                    }
+
+                    let raw_format = state.format.format().as_raw();
+                    let swap = raw_format == SpaVideoFormat::BGRx.as_raw()
+                        || raw_format == SpaVideoFormat::BGRA.as_raw();
+
+                    let row_bytes = width * 4;
+                    let mut out = vec![0u8; row_bytes * height];
+
+                    for y in 0..height {
+                        let src_start = chunk_offset + y * src_stride;
+                        let src = &bytes[src_start..src_start + row_bytes];
+                        let dst = &mut out[y * row_bytes..(y + 1) * row_bytes];
+
+                        if swap {
+                            for (d, s) in dst.chunks_exact_mut(4).zip(src.chunks_exact(4)) {
+                                d[0] = s[2];
+                                d[1] = s[1];
+                                d[2] = s[0];
+                                d[3] = 255;
+                            }
+                        } else {
+                            dst.copy_from_slice(src);
+                        }
+                    }
+
+                    state.frames += 1;
+                    if state.frames == 1 || state.frames % 300 == 0 {
+                        info!("PIPEWIRE: frame #{} {}x{}", state.frames, width, height);
+                    }
+
+                    let frame = VideoFrame::Cpu {
+                        data: out,
+                        width: size.width,
+                        height: size.height,
+                        stride: row_bytes as u32,
+                        format: VideoFormat::Rgba,
+                        timestamp: state.started.elapsed().as_micros() as u64,
+                    };
+
+                    (state.callback)(frame);
+                })
+                .register()
+            {
+                Ok(listener) => listener,
+                Err(err) => {
+                    error!("PIPEWIRE: failed to register stream listener: {:?}", err);
+                    return;
+                }
+            };
+
+            let mut params = [match Pod::from_bytes(&params_bytes) {
+                Some(pod) => pod,
+                None => {
+                    error!("PIPEWIRE: invalid format pod");
+                    return;
+                }
+            }];
+
+            if let Err(err) = stream.connect(
+                pw::spa::utils::Direction::Input,
+                Some(node_id),
+                pw::stream::StreamFlags::AUTOCONNECT | pw::stream::StreamFlags::MAP_BUFFERS,
+                &mut params,
+            ) {
+                error!("PIPEWIRE: stream connect failed: {:?}", err);
+                return;
+            }
+
+            info!("PIPEWIRE: stream connected, running main loop");
 
             main_loop.run();
 
             info!("PIPEWIRE: loop stopped cleanly");
+
+            drop(portal);
         });
 
         self.thread_handle = Some(handle);
@@ -100,8 +392,8 @@ impl LinuxCapture {
     }
 
     fn stop_capture(&mut self) -> Result<(), ()> {
-        if let Some(main_loop) = self.main_loop.take() {
-            main_loop.quit();
+        if let Some(sender) = self.quit_sender.take() {
+            let _ = sender.send(());
         }
 
         if let Some(handle) = self.thread_handle.take() {
@@ -115,26 +407,12 @@ impl LinuxCapture {
 }
 
 impl CaptureBackend for LinuxCapture {
-    fn start(
-        &mut self,
-        callback: Box<dyn Fn(crate::frame::VideoFrame) + Send + Sync>,
-    ) -> Result<(), ()> {
+    fn start(&mut self, callback: Box<dyn Fn(VideoFrame) + Send + Sync>) -> Result<(), ()> {
         self.start_capture(callback)
     }
 
     fn info(&self) -> CaptureInfo {
-        self.portal
-            .as_ref()
-            .and_then(|portal| portal.streams.first())
-            .and_then(|stream| stream.size())
-            .map(|(width, height)| CaptureInfo {
-                width: width as u32,
-                height: height as u32,
-            })
-            .unwrap_or(CaptureInfo {
-                width: 0,
-                height: 0,
-            })
+        self.info.clone()
     }
 
     fn stop(&mut self) -> Result<(), ()> {

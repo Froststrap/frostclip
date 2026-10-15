@@ -1,20 +1,19 @@
 [package]
 name = "frostclip"
-edition.workspace = true
 version.workspace = true
+edition.workspace = true
+license.workspace = true
 authors.workspace = true
 
-
 [dependencies]
-logging_subscriber.workspace = true
-ffmpeg-sys-next.workspace = true
-ffmpeg-next.workspace = true
-pipewire.workspace = true
-tracing.workspace = true
-chrono.workspace = true
-libspa.workspace = true
 ashpd.workspace = true
-tokio.workspace = true
-serde.workspace = true
+chrono.workspace = true
 dirs.workspace = true
+ffmpeg-next.workspace = true
+ffmpeg-sys-next.workspace = true
+logging_subscriber.workspace = true
+pipewire.workspace = true
+serde.workspace = true
+tokio.workspace = true
 toml.workspace = true
+tracing.workspace = true

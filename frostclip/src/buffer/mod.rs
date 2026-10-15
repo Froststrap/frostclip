@@ -32,19 +32,27 @@ impl ReplayBuffer {
     }
 
     pub fn get_last_seconds(&self, seconds: usize) -> Vec<EncodedPacket> {
-        if self.packets.is_empty() {
+        let Some(last) = self.packets.back() else {
             return Vec::new();
-        }
+        };
 
-        let last_pts = self.packets.back().unwrap().pts;
+        let cutoff = last.pts - (seconds as i64 * self.timebase);
 
-        let cutoff = last_pts - (seconds as i64 * self.timebase);
-
-        self.packets
+        let first = self
+            .packets
             .iter()
-            .filter(|p| p.pts >= cutoff)
-            .cloned()
-            .collect()
+            .position(|p| p.pts >= cutoff)
+            .unwrap_or(0);
+
+        let start = (0..=first)
+            .rev()
+            .find(|&i| self.packets[i].is_keyframe)
+            .or_else(|| (first..self.packets.len()).find(|&i| self.packets[i].is_keyframe));
+
+        match start {
+            Some(start) => self.packets.iter().skip(start).cloned().collect(),
+            None => Vec::new(),
+        }
     }
 
     pub fn timebase(&self) -> i64 {
