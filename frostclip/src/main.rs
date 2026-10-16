@@ -36,8 +36,14 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     debug!("Initializing capture engine...");
 
-    let config = Config::new(1366, 768, 60, 3000, 300, 5, "./clips")
-        .map_err(|e| format!("Failed to create config: {e:?}"))?;
+    let config = match Config::load() {
+        Ok(config) => config,
+        Err(_) => {
+            let config = Config::default();
+            config.save()?;
+            config
+        }
+    };
 
     let clip_seconds = config.default_clip_seconds;
 

@@ -174,6 +174,14 @@ impl Encoder for VaapiEncoder {
             return Err(());
         }
 
+        if width != self.width || height != self.height {
+            warn!(
+                "VAAPI: input dimensions {}x{} don't match encoder dimensions {}x{}",
+                width, height, self.width, self.height
+            );
+            return Err(());
+        }
+
         let mut src =
             ffmpeg::util::frame::video::Video::new(ffmpeg::format::Pixel::RGBA, width, height);
 
@@ -190,7 +198,9 @@ impl Encoder for VaapiEncoder {
         let mut nv12 =
             ffmpeg::util::frame::video::Video::new(ffmpeg::format::Pixel::NV12, width, height);
 
-        self.scaler.0.run(&src, &mut nv12).unwrap();
+        self.scaler.0.run(&src, &mut nv12).map_err(|err| {
+            warn!("VAAPI: RGBA->NV12 scaling failed: {err}");
+        })?;
 
         let mut hw_frame = ffmpeg::util::frame::video::Video::empty();
 

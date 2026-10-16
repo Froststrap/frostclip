@@ -118,14 +118,40 @@ impl CaptureEngine {
         let buffer = Arc::clone(&self.buffer);
         let running = Arc::clone(&self.running);
 
+        let frame_count = Arc::new(Mutex::new(0u64));
+        let fps_start = Arc::new(Mutex::new(std::time::Instant::now()));
+
+        let fps_count = Arc::clone(&frame_count);
+        let fps_timer = Arc::clone(&fps_start);
+
         *lock(&running) = true;
 
         self.capture
             .start(Box::new(move |frame| {
                 if !*lock(&running) {
-                    debug!("ENGINE: ignoring frame after stop");
                     return;
                 }
+
+                let elapsed = {
+                    let mut count = lock(&fps_count);
+                    *count += 1;
+
+                    let mut timer = lock(&fps_timer);
+                    let elapsed = timer.elapsed();
+
+                    if elapsed.as_secs_f64() >= 1.0 {
+                        info!(
+                            "ENGINE: capture FPS={:.2} frames={}",
+                            *count as f64 / elapsed.as_secs_f64(),
+                            *count
+                        );
+
+                        *count = 0;
+                        *timer = std::time::Instant::now();
+                    }
+
+                    elapsed
+                };
 
                 let t0 = std::time::Instant::now();
 
@@ -138,7 +164,7 @@ impl CaptureEngine {
                 };
 
                 debug!(
-                    "ENGINE: submit {:.2}ms packets={}",
+                    "ENGINE: encoder submit={:.2}ms packets={}",
                     t0.elapsed().as_secs_f64() * 1000.0,
                     packets.len()
                 );
@@ -146,15 +172,8 @@ impl CaptureEngine {
                 let mut buffer = lock(&buffer);
 
                 for packet in packets {
-                    debug!(
-                        "ENGINE: pushing packet pts={} dts={} keyframe={}",
-                        packet.pts, packet.dts, packet.is_keyframe
-                    );
-
                     buffer.push(packet);
                 }
-
-                debug!("ENGINE: replay buffer size={}", buffer.len());
             }))
             .map_err(|_| EngineError::Capture)?;
 
