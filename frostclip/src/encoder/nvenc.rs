@@ -51,6 +51,8 @@ impl NvencEncoder {
         encoder.set_width(width);
         encoder.set_height(height);
         encoder.set_time_base(ffmpeg::Rational::new(1, 1_000_000));
+        encoder.set_frame_rate(Some(ffmpeg::Rational::new(framerate as i32, 1)));
+        encoder.set_flags(ffmpeg::codec::Flags::GLOBAL_HEADER);
 
         unsafe {
             (*encoder.as_mut_ptr()).hw_frames_ctx = av_buffer_ref(hw.frames_ctx());

@@ -1,9 +1,9 @@
 use ffmpeg_next as ffmpeg;
-use tracing::info;
+use tracing::{error, info};
 
 use crate::{
     encoder::{EncodedPacket, Encoder, VideoInfo, extract_codec_parameters},
-    frame::VideoFrame,
+    frame::{VideoFormat, VideoFrame},
 };
 
 pub struct SendScaler(pub ffmpeg::software::scaling::Context);
@@ -11,8 +11,7 @@ pub struct SendScaler(pub ffmpeg::software::scaling::Context);
 unsafe impl Send for SendScaler {}
 
 pub struct SoftwareEncoder {
-    frame_count: u64,
-    framerate: u32,
+    last_packet_pts: Option<i64>,
 
     encoder: ffmpeg::codec::encoder::video::Encoder,
 
@@ -34,27 +33,28 @@ impl SoftwareEncoder {
         framerate: u32,
         bitrate_kbps: u32,
     ) -> Result<Self, ()> {
-        ffmpeg::init().unwrap();
+        ffmpeg::init().map_err(|err| {
+            error!("SW: ffmpeg init failed: {}", err);
+        })?;
 
-        let codec = ffmpeg::encoder::find_by_name("libx264").expect("libx264 not found");
+        let codec = ffmpeg::encoder::find_by_name("libx264").ok_or_else(|| {
+            error!("SW: libx264 not found");
+        })?;
 
         let context = ffmpeg::codec::context::Context::new_with_codec(codec);
 
-        let mut encoder = context.encoder().video().unwrap();
+        let mut encoder = context.encoder().video().map_err(|err| {
+            error!("SW: failed to create video encoder: {}", err);
+        })?;
 
         encoder.set_width(output_width);
         encoder.set_height(output_height);
-        encoder.set_time_base((1, framerate as i32));
+        encoder.set_time_base(ffmpeg::Rational::new(1, 1_000_000));
         encoder.set_frame_rate(Some(ffmpeg::Rational::new(framerate as i32, 1)));
         encoder.set_format(ffmpeg::format::Pixel::YUV420P);
         encoder.set_max_b_frames(0);
+        encoder.set_flags(ffmpeg::codec::Flags::GLOBAL_HEADER);
 
-        // ABR-style bitrate targeting (x264 doesn't have distinct VBR/CBR modes
-        // like VAAPI. Setting bitrate + maxrate + bufsize gives you VBR behavior).
-        //   bit_rate  = target average
-        //   maxrate   = 1.5x for burst headroom on complex frames
-        //   bufsize   = 2x for VBV constraint window
-        //   gop_size  = framerate (keyframe about every ~1 second)
         let bit_rate = (bitrate_kbps as usize) * 1000;
         let max_rate = bit_rate * 3 / 2;
         let buf_size = bit_rate * 2;
@@ -63,7 +63,6 @@ impl SoftwareEncoder {
         encoder.set_max_bit_rate(max_rate);
         encoder.set_gop(framerate);
 
-        // bufsize isn't exposed on the safe wrapper
         unsafe {
             (*encoder.as_mut_ptr()).rc_buffer_size = buf_size as i32;
         }
@@ -80,7 +79,9 @@ impl SoftwareEncoder {
             framerate
         );
 
-        let encoder = encoder.open_with(options).unwrap();
+        let encoder = encoder.open_with(options).map_err(|err| {
+            error!("SW: failed to open libx264: {}", err);
+        })?;
 
         let scaler = SendScaler(
             ffmpeg::software::scaling::Context::get(
@@ -92,7 +93,9 @@ impl SoftwareEncoder {
                 output_height,
                 ffmpeg::software::scaling::flag::Flags::BILINEAR,
             )
-            .unwrap(),
+            .map_err(|err| {
+                error!("SW: failed to create scaler: {}", err);
+            })?,
         );
 
         info!(
@@ -101,8 +104,7 @@ impl SoftwareEncoder {
         );
 
         Ok(Self {
-            frame_count: 0,
-            framerate,
+            last_packet_pts: None,
 
             encoder,
             scaler,
@@ -114,43 +116,69 @@ impl SoftwareEncoder {
             output_height,
         })
     }
+
+    fn drain(&mut self) -> Vec<EncodedPacket> {
+        let mut packets = Vec::new();
+
+        loop {
+            let mut packet = ffmpeg::Packet::empty();
+
+            if self.encoder.receive_packet(&mut packet).is_err() {
+                break;
+            }
+
+            let pts = packet.pts().unwrap_or(0);
+            let dts = packet.dts().unwrap_or(pts);
+
+            let duration = match self.last_packet_pts {
+                Some(last) => pts - last,
+                None => 1,
+            };
+
+            self.last_packet_pts = Some(pts);
+
+            packets.push(EncodedPacket {
+                data: packet.data().unwrap_or(&[]).to_vec(),
+                pts,
+                dts,
+                duration,
+                is_keyframe: packet.is_key(),
+            });
+        }
+
+        packets
+    }
 }
 
 impl Encoder for SoftwareEncoder {
     fn submit(&mut self, frame: VideoFrame) -> Result<Vec<EncodedPacket>, ()> {
-        self.frame_count += 1;
-
         let VideoFrame::Cpu {
             data,
             width,
             height,
             stride,
             format,
-            ..
+            timestamp,
         } = frame
         else {
-            eprintln!("DMA-BUF unsupported");
+            error!("SW: DMA-BUF unsupported");
             return Err(());
         };
 
-        if format != crate::frame::VideoFormat::Rgba {
-            eprintln!("Expected RGBA");
+        if format != VideoFormat::Rgba {
+            error!("SW: expected RGBA, found {:?}", format);
             return Err(());
         }
 
         if width != self.input_width || height != self.input_height {
-            eprintln!(
-                "Input resolution changed {}x{} expected {}x{}",
+            error!(
+                "SW: input resolution changed {}x{} expected {}x{}",
                 width, height, self.input_width, self.input_height
             );
             return Err(());
         }
 
-        let mut in_frame = ffmpeg::frame::Video::empty();
-
-        unsafe {
-            in_frame.alloc(ffmpeg::format::Pixel::RGBA, width, height);
-        }
+        let mut in_frame = ffmpeg::frame::Video::new(ffmpeg::format::Pixel::RGBA, width, height);
 
         let dst_stride = in_frame.stride(0);
         let src_stride = stride as usize;
@@ -167,49 +195,50 @@ impl Encoder for SoftwareEncoder {
             }
         }
 
-        // Encoder timebase = 1/framerate
-        in_frame.set_pts(Some(self.frame_count as i64));
-
         let mut out_frame = ffmpeg::frame::Video::empty();
 
-        self.scaler.0.run(&in_frame, &mut out_frame).unwrap();
+        self.scaler
+            .0
+            .run(&in_frame, &mut out_frame)
+            .map_err(|err| {
+                error!("SW: scaling failed: {}", err);
+            })?;
 
-        self.encoder.send_frame(&out_frame).unwrap();
+        out_frame.set_pts(Some(timestamp as i64));
 
-        let mut packets = Vec::new();
-        let mut packet = ffmpeg::Packet::empty();
+        self.encoder.send_frame(&out_frame).map_err(|err| {
+            error!("SW: failed to submit frame: {}", err);
+        })?;
 
-        while self.encoder.receive_packet(&mut packet).is_ok() {
-            packets.push(EncodedPacket {
-                data: packet.data().unwrap().to_vec(),
-
-                pts: packet.pts().unwrap_or(0),
-                dts: packet.dts().unwrap_or(0),
-                duration: packet.duration(),
-
-                is_keyframe: packet.is_key(),
-            });
-        }
-
-        Ok(packets)
+        Ok(self.drain())
     }
 
     fn flush(&mut self) -> Result<Vec<EncodedPacket>, ()> {
-        Ok(Vec::new())
+        info!("SW: flushing encoder");
+
+        self.encoder.send_eof().map_err(|err| {
+            error!("SW: failed to send EOF: {}", err);
+        })?;
+
+        let packets = self.drain();
+
+        info!("SW: flush returned {} packets", packets.len());
+
+        Ok(packets)
     }
 
     fn video_info(&self) -> Option<VideoInfo> {
         let extradata =
             unsafe { extract_codec_parameters(self.encoder.as_ptr()).unwrap_or_default() };
 
-        info!("SW: extradata size={}", extradata.len());
+        let tb = self.encoder.time_base();
 
         Some(VideoInfo {
             width: self.output_width,
             height: self.output_height,
 
-            time_base_num: 1,
-            time_base_den: self.framerate as i32,
+            time_base_num: tb.numerator(),
+            time_base_den: tb.denominator(),
 
             extradata,
 

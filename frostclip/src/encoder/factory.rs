@@ -16,45 +16,49 @@ pub struct EncoderConfig {
     pub bitrate_kbps: u32,
 }
 
-pub fn create_encoder(config: EncoderConfig) -> Result<Box<dyn Encoder>, ()> {
-    if NvencEncoder::probe() {
-        info!("Using NVENC encoder");
-
-        match NvencEncoder::new(
-            config.output_width,
-            config.output_height,
-            config.framerate,
-            config.bitrate_kbps,
-        ) {
-            Ok(encoder) => {
-                return Ok(Box::new(encoder));
-            }
-
-            Err(err) => {
-                warn!("NVENC init failed {:?}, falling back", err);
-            }
-        }
+fn try_nvenc(config: EncoderConfig) -> Option<Box<dyn Encoder>> {
+    if !NvencEncoder::probe() {
+        return None;
     }
 
-    if VaapiEncoder::probe() {
-        info!("Using VAAPI encoder");
+    info!("Using NVENC encoder");
 
-        match VaapiEncoder::new(
-            config.output_width,
-            config.output_height,
-            config.framerate,
-            config.bitrate_kbps,
-        ) {
-            Ok(encoder) => {
-                return Ok(Box::new(encoder));
-            }
-
-            Err(err) => {
-                warn!("VAAPI init failed {:?}, falling back", err);
-            }
+    match NvencEncoder::new(
+        config.output_width,
+        config.output_height,
+        config.framerate,
+        config.bitrate_kbps,
+    ) {
+        Ok(encoder) => Some(Box::new(encoder)),
+        Err(err) => {
+            warn!("NVENC init failed {:?}, falling back", err);
+            None
         }
     }
+}
 
+fn try_vaapi(config: EncoderConfig) -> Option<Box<dyn Encoder>> {
+    if !VaapiEncoder::probe() {
+        return None;
+    }
+
+    info!("Using VAAPI encoder");
+
+    match VaapiEncoder::new(
+        config.output_width,
+        config.output_height,
+        config.framerate,
+        config.bitrate_kbps,
+    ) {
+        Ok(encoder) => Some(Box::new(encoder)),
+        Err(err) => {
+            warn!("VAAPI init failed {:?}, falling back", err);
+            None
+        }
+    }
+}
+
+fn software(config: EncoderConfig) -> Result<Box<dyn Encoder>, ()> {
     info!("Using software encoder (libx264)");
 
     Ok(Box::new(SoftwareEncoder::new(
@@ -65,4 +69,32 @@ pub fn create_encoder(config: EncoderConfig) -> Result<Box<dyn Encoder>, ()> {
         config.framerate,
         config.bitrate_kbps,
     )?))
+}
+
+pub fn create_encoder(config: EncoderConfig) -> Result<Box<dyn Encoder>, ()> {
+    match std::env::var("FROSTCLIP_ENCODER").ok().as_deref() {
+        Some("software") => return software(config),
+        Some("vaapi") => {
+            return try_vaapi(config).ok_or_else(|| {
+                warn!("FROSTCLIP_ENCODER=vaapi requested but unavailable");
+            });
+        }
+        Some("nvenc") => {
+            return try_nvenc(config).ok_or_else(|| {
+                warn!("FROSTCLIP_ENCODER=nvenc requested but unavailable");
+            });
+        }
+        Some(other) => warn!("FROSTCLIP_ENCODER={} unknown, using auto", other),
+        None => {}
+    }
+
+    if let Some(encoder) = try_nvenc(config) {
+        return Ok(encoder);
+    }
+
+    if let Some(encoder) = try_vaapi(config) {
+        return Ok(encoder);
+    }
+
+    software(config)
 }

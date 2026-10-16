@@ -31,6 +31,7 @@
   intel-vaapi-driver,
   nvidia-vaapi-driver,
   inputs,
+  mpv,
 }:
 let
   inherit (inputs) fenix crane;
@@ -75,6 +76,7 @@ craneLib.devShell rec {
     pkg-config
     ffmpeg-full
     clang
+    mpv
     just
   ]
   ++ lib.optionals stdenv.isDarwin [

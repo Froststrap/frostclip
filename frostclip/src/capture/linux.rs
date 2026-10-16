@@ -136,9 +136,48 @@ impl LinuxCapture {
         })
     }
 
+    fn build_buffer_params() -> Result<Vec<u8>, ()> {
+        use pw::spa::pod::{ChoiceValue, Object, Property, PropertyFlags, Value};
+        use pw::spa::utils::{Choice, ChoiceEnum, ChoiceFlags};
+
+        let obj = Object {
+            type_: pw::spa::utils::SpaTypes::ObjectParamBuffers.as_raw(),
+            id: pw::spa::param::ParamType::Buffers.as_raw(),
+            properties: vec![
+                Property {
+                    key: pw::spa::sys::SPA_PARAM_BUFFERS_buffers,
+                    flags: PropertyFlags::empty(),
+                    value: Value::Choice(ChoiceValue::Int(Choice(
+                        ChoiceFlags::empty(),
+                        ChoiceEnum::Range {
+                            default: 8,
+                            min: 4,
+                            max: 16,
+                        },
+                    ))),
+                },
+                Property {
+                    key: pw::spa::sys::SPA_PARAM_BUFFERS_dataType,
+                    flags: PropertyFlags::empty(),
+                    value: Value::Int(1 << pw::spa::sys::SPA_DATA_MemPtr),
+                },
+            ],
+        };
+
+        pw::spa::pod::serialize::PodSerializer::serialize(
+            std::io::Cursor::new(Vec::new()),
+            &Value::Object(obj),
+        )
+        .map(|(cursor, _)| cursor.into_inner())
+        .map_err(|err| {
+            error!("PIPEWIRE: failed to serialize buffer params: {:?}", err);
+        })
+    }
+
     fn start_capture(&mut self, callback: FrameCallback) -> Result<(), ()> {
         let portal = self.portal.take().ok_or(())?;
         let params_bytes = Self::build_format_params()?;
+        let buffer_bytes = Self::build_buffer_params()?;
         let expected = (self.info.width, self.info.height);
 
         let (quit_sender, quit_receiver) = pw::channel::channel::<()>();
@@ -241,11 +280,17 @@ impl LinuxCapture {
                     state.negotiated = true;
 
                     let size = state.format.size();
+                    let fr = state.format.framerate();
+                    let max_fr = state.format.max_framerate();
                     info!(
-                        "PIPEWIRE: negotiated format={:?} size={}x{}",
+                        "PIPEWIRE: negotiated format={:?} size={}x{} fps={}/{} max={}/{}",
                         state.format.format(),
                         size.width,
-                        size.height
+                        size.height,
+                        fr.num,
+                        fr.denom,
+                        max_fr.num,
+                        max_fr.denom
                     );
 
                     if (size.width, size.height) != state.expected {
@@ -335,8 +380,14 @@ impl LinuxCapture {
                     }
 
                     state.frames += 1;
-                    if state.frames == 1 || state.frames % 300 == 0 {
-                        info!("PIPEWIRE: frame #{} {}x{}", state.frames, width, height);
+                    if state.frames == 1 || state.frames % 60 == 0 {
+                        info!(
+                            "PIPEWIRE: frame #{} {}x{} t={:.2}s",
+                            state.frames,
+                            width,
+                            height,
+                            state.started.elapsed().as_secs_f64()
+                        );
                     }
 
                     let frame = VideoFrame::Cpu {
@@ -347,6 +398,8 @@ impl LinuxCapture {
                         format: VideoFormat::Rgba,
                         timestamp: state.started.elapsed().as_micros() as u64,
                     };
+
+                    drop(buffer);
 
                     (state.callback)(frame);
                 })
@@ -359,13 +412,23 @@ impl LinuxCapture {
                 }
             };
 
-            let mut params = [match Pod::from_bytes(&params_bytes) {
+            let format_pod = match Pod::from_bytes(&params_bytes) {
                 Some(pod) => pod,
                 None => {
                     error!("PIPEWIRE: invalid format pod");
                     return;
                 }
-            }];
+            };
+
+            let buffer_pod = match Pod::from_bytes(&buffer_bytes) {
+                Some(pod) => pod,
+                None => {
+                    error!("PIPEWIRE: invalid buffer pod");
+                    return;
+                }
+            };
+
+            let mut params = [format_pod, buffer_pod];
 
             if let Err(err) = stream.connect(
                 pw::spa::utils::Direction::Input,
