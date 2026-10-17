@@ -86,6 +86,15 @@ impl VaapiEncoder {
         encoder.set_time_base(ffmpeg::Rational::new(1, 1_000_000));
         encoder.set_frame_rate(Some(ffmpeg::Rational::new(framerate as i32, 1)));
         encoder.set_flags(ffmpeg::codec::Flags::GLOBAL_HEADER);
+        encoder.set_colorspace(ffmpeg::color::Space::BT709);
+        encoder.set_color_range(ffmpeg::color::Range::MPEG);
+
+        unsafe {
+            (*encoder.as_mut_ptr()).color_primaries =
+                ffmpeg_sys_next::AVColorPrimaries::AVCOL_PRI_BT709;
+            (*encoder.as_mut_ptr()).color_trc =
+                ffmpeg_sys_next::AVColorTransferCharacteristic::AVCOL_TRC_BT709;
+        }
 
         let frames_ctx = match (&mut graph, &hw) {
             (Some(graph), _) => graph.hw_frames_ctx(),
