@@ -20,6 +20,7 @@ struct StreamState {
     started: Instant,
     expected: (u32, u32),
     logged_no_map: bool,
+    logged_type: bool,
     frames: u64,
 }
 
@@ -246,6 +247,7 @@ impl LinuxCapture {
                 started: Instant::now(),
                 expected,
                 logged_no_map: false,
+                logged_type: false,
                 frames: 0,
             };
 
@@ -317,6 +319,17 @@ impl LinuxCapture {
                     let chunk_size = data.chunk().size() as usize;
                     let chunk_offset = data.chunk().offset() as usize;
                     let chunk_stride = data.chunk().stride();
+
+                    if !state.logged_type {
+                        info!(
+                            "PIPEWIRE: buffer type={:?} chunk size={} offset={} stride={}",
+                            data.type_(),
+                            chunk_size,
+                            chunk_offset,
+                            chunk_stride
+                        );
+                        state.logged_type = true;
+                    }
 
                     if chunk_size == 0 {
                         debug!("PIPEWIRE: empty chunk, skipping");
