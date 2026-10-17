@@ -16,6 +16,7 @@ pub struct DmaBufFrame {
     pub stride: u32,
     pub offset: u32,
     pub modifier: u64,
+    pub fourcc: u32,
     pub format: VideoFormat,
     pub timestamp: u64,
 }
