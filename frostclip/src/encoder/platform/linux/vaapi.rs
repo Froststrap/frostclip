@@ -13,6 +13,9 @@ unsafe impl Send for SendScaler {}
 pub struct VaapiEncoder {
     width: u32,
     height: u32,
+    input_width: u32,
+    input_height: u32,
+
     frame_count: u64,
     last_packet_pts: Option<i64>,
 
@@ -38,7 +41,14 @@ impl VaapiEncoder {
         }
     }
 
-    pub fn new(width: u32, height: u32, framerate: u32, bitrate_kbps: u32) -> Result<Self, ()> {
+    pub fn new(
+        input_width: u32,
+        input_height: u32,
+        width: u32,
+        height: u32,
+        framerate: u32,
+        bitrate_kbps: u32,
+    ) -> Result<Self, ()> {
         ffmpeg::init().unwrap();
 
         let hw = VaapiHardware::new("/dev/dri/renderD128", width, height).map_err(|_| ())?;
@@ -93,8 +103,8 @@ impl VaapiEncoder {
         let scaler = SendScaler(
             ffmpeg::software::scaling::Context::get(
                 ffmpeg::format::Pixel::RGBA,
-                width,
-                height,
+                input_width,
+                input_height,
                 ffmpeg::format::Pixel::NV12,
                 width,
                 height,
@@ -106,6 +116,8 @@ impl VaapiEncoder {
         Ok(Self {
             width,
             height,
+            input_width,
+            input_height,
             frame_count: 0,
             last_packet_pts: None,
             encoder,
@@ -174,10 +186,10 @@ impl Encoder for VaapiEncoder {
             return Err(());
         }
 
-        if width != self.width || height != self.height {
+        if width != self.input_width || height != self.input_height {
             warn!(
-                "VAAPI: input dimensions {}x{} don't match encoder dimensions {}x{}",
-                width, height, self.width, self.height
+                "VAAPI: input dimensions {}x{} don't match capture dimensions {}x{}",
+                width, height, self.input_width, self.input_height
             );
             return Err(());
         }
@@ -195,8 +207,11 @@ impl Encoder for VaapiEncoder {
                 .copy_from_slice(&data[src_start..src_start + width as usize * 4]);
         }
 
-        let mut nv12 =
-            ffmpeg::util::frame::video::Video::new(ffmpeg::format::Pixel::NV12, width, height);
+        let mut nv12 = ffmpeg::util::frame::video::Video::new(
+            ffmpeg::format::Pixel::NV12,
+            self.width,
+            self.height,
+        );
 
         self.scaler.0.run(&src, &mut nv12).map_err(|err| {
             warn!("VAAPI: RGBA->NV12 scaling failed: {err}");
