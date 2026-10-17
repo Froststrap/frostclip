@@ -20,6 +20,7 @@ unsafe extern "C" fn free_descriptor(_opaque: *mut libc::c_void, data: *mut u8) 
 
 pub fn drm_prime_frame(
     frame: DmaBufFrame,
+    frames_ctx: *mut sys::AVBufferRef,
 ) -> Result<ffmpeg::util::frame::video::Video, std::io::Error> {
     let width = frame.width;
     let height = frame.height;
@@ -74,6 +75,12 @@ pub fn drm_prime_frame(
         (*raw).data[0] = descriptor as *mut u8;
         (*raw).buf[0] = buf;
         (*raw).pts = timestamp as i64;
+        (*raw).hw_frames_ctx = sys::av_buffer_ref(frames_ctx);
+        if (*raw).hw_frames_ctx.is_null() {
+            return Err(std::io::Error::other(
+                "av_buffer_ref failed for DRM frames ctx",
+            ));
+        }
 
         Ok(video)
     }

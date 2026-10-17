@@ -2,9 +2,11 @@ use ffmpeg_next as ffmpeg;
 use ffmpeg_sys_next::{av_buffer_ref, av_hwframe_get_buffer, av_hwframe_transfer_data};
 use tracing::{info, warn};
 
+use super::drm_frame::drm_prime_frame;
+use super::vaapi_graph::VaapiGraph;
 use super::vaapi_hw::VaapiHardware;
 use crate::encoder::{EncodedPacket, Encoder, VideoInfo, extract_codec_parameters};
-use crate::frame::{VideoFormat, VideoFrame};
+use crate::frame::{DmaBufFrame, VideoFormat, VideoFrame};
 
 pub struct SendScaler(pub ffmpeg::software::scaling::Context);
 
@@ -21,7 +23,8 @@ pub struct VaapiEncoder {
 
     encoder: ffmpeg::codec::encoder::video::Encoder,
     scaler: SendScaler,
-    hw: VaapiHardware,
+    hw: Option<VaapiHardware>,
+    graph: Option<VaapiGraph>,
 }
 
 impl VaapiEncoder {
@@ -51,7 +54,26 @@ impl VaapiEncoder {
     ) -> Result<Self, ()> {
         ffmpeg::init().unwrap();
 
-        let hw = VaapiHardware::new("/dev/dri/renderD128", width, height).map_err(|_| ())?;
+        let mut graph = match VaapiGraph::new(
+            "/dev/dri/renderD128",
+            input_width,
+            input_height,
+            width,
+            height,
+            framerate,
+        ) {
+            Ok(graph) => Some(graph),
+            Err(err) => {
+                warn!("VAAPI: dma-buf graph unavailable, CPU path only: {err}");
+                None
+            }
+        };
+
+        let hw = if graph.is_some() {
+            None
+        } else {
+            Some(VaapiHardware::new("/dev/dri/renderD128", width, height).map_err(|_| ())?)
+        };
 
         let codec = ffmpeg::encoder::find_by_name("h264_vaapi").expect("h264_vaapi missing");
 
@@ -65,8 +87,14 @@ impl VaapiEncoder {
         encoder.set_frame_rate(Some(ffmpeg::Rational::new(framerate as i32, 1)));
         encoder.set_flags(ffmpeg::codec::Flags::GLOBAL_HEADER);
 
+        let frames_ctx = match (&mut graph, &hw) {
+            (Some(graph), _) => graph.hw_frames_ctx(),
+            (None, Some(hw)) => hw.frames_ctx(),
+            _ => return Err(()),
+        };
+
         unsafe {
-            (*encoder.as_mut_ptr()).hw_frames_ctx = av_buffer_ref(hw.frames_ctx());
+            (*encoder.as_mut_ptr()).hw_frames_ctx = av_buffer_ref(frames_ctx);
         }
 
         encoder.set_format(ffmpeg::format::Pixel::VAAPI);
@@ -123,7 +151,52 @@ impl VaapiEncoder {
             encoder,
             scaler,
             hw,
+            graph,
         })
+    }
+
+    fn frames_ctx(&mut self) -> *mut ffmpeg_sys_next::AVBufferRef {
+        match (&mut self.graph, &self.hw) {
+            (Some(graph), _) => graph.hw_frames_ctx(),
+            (_, Some(hw)) => hw.frames_ctx(),
+            _ => std::ptr::null_mut(),
+        }
+    }
+
+    fn submit_dmabuf(&mut self, dma: DmaBufFrame) -> Result<Vec<EncodedPacket>, ()> {
+        let Some(graph) = self.graph.as_mut() else {
+            return Err(());
+        };
+
+        if dma.width != self.input_width || dma.height != self.input_height {
+            warn!(
+                "VAAPI: dma-buf dimensions {}x{} don't match capture dimensions {}x{}",
+                dma.width, dma.height, self.input_width, self.input_height
+            );
+            return Err(());
+        }
+
+        let frame = drm_prime_frame(dma, graph.drm_frames_ctx()).map_err(|err| {
+            warn!("VAAPI: DRM frame build failed: {err}");
+        })?;
+
+        graph.push(&frame).map_err(|err| {
+            warn!("VAAPI: {err}");
+        })?;
+
+        loop {
+            let mut out = ffmpeg::util::frame::video::Video::empty();
+
+            if graph.pull(&mut out).is_err() {
+                break;
+            }
+
+            self.encoder.send_frame(&out).map_err(|_| ())?;
+        }
+
+        self.frame_count += 1;
+
+        Ok(self.drain())
     }
 
     pub fn drain(&mut self) -> Vec<EncodedPacket> {
@@ -169,6 +242,13 @@ impl VaapiEncoder {
 
 impl Encoder for VaapiEncoder {
     fn submit(&mut self, frame: VideoFrame) -> Result<Vec<EncodedPacket>, ()> {
+        let frame = match frame {
+            VideoFrame::LinuxDmaBuf(dma) => return self.submit_dmabuf(dma),
+            other => other,
+        };
+
+        let frames_ctx = self.frames_ctx();
+
         let (data, width, height, stride, format, timestamp) = match frame {
             VideoFrame::Cpu {
                 data,
@@ -220,7 +300,7 @@ impl Encoder for VaapiEncoder {
         let mut hw_frame = ffmpeg::util::frame::video::Video::empty();
 
         unsafe {
-            if av_hwframe_get_buffer(self.hw.frames_ctx(), hw_frame.as_mut_ptr(), 0) < 0 {
+            if av_hwframe_get_buffer(frames_ctx, hw_frame.as_mut_ptr(), 0) < 0 {
                 return Err(());
             }
 
@@ -268,5 +348,9 @@ impl Encoder for VaapiEncoder {
             codec: ffmpeg::codec::Id::H264,
             format: ffmpeg::format::Pixel::YUV420P,
         })
+    }
+
+    fn accepts_dmabuf(&self) -> bool {
+        self.graph.is_some()
     }
 }
