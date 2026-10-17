@@ -1,8 +1,13 @@
+use ffmpeg_next as ffmpeg;
 use tracing::{info, warn};
 
-use crate::encoder::{
-    Encoder, nvenc::NvencEncoder, software::SoftwareEncoder, vaapi::VaapiEncoder,
+use super::{
+    Encoder,
+    platform::{nvenc::NvencEncoder, software::SoftwareEncoder},
 };
+
+#[cfg(target_os = "linux")]
+use super::platform::linux::VaapiEncoder;
 
 #[derive(Debug, Clone, Copy)]
 pub struct EncoderConfig {
@@ -14,6 +19,13 @@ pub struct EncoderConfig {
 
     pub framerate: u32,
     pub bitrate_kbps: u32,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct EncoderStatus {
+    pub name: &'static str,
+    pub supported: bool,
+    pub available: bool,
 }
 
 fn try_nvenc(config: EncoderConfig) -> Option<Box<dyn Encoder>> {
@@ -37,6 +49,7 @@ fn try_nvenc(config: EncoderConfig) -> Option<Box<dyn Encoder>> {
     }
 }
 
+#[cfg(target_os = "linux")]
 fn try_vaapi(config: EncoderConfig) -> Option<Box<dyn Encoder>> {
     if !VaapiEncoder::probe() {
         return None;
@@ -58,6 +71,11 @@ fn try_vaapi(config: EncoderConfig) -> Option<Box<dyn Encoder>> {
     }
 }
 
+#[cfg(not(target_os = "linux"))]
+fn try_vaapi(_config: EncoderConfig) -> Option<Box<dyn Encoder>> {
+    None
+}
+
 fn software(config: EncoderConfig) -> Result<Box<dyn Encoder>, ()> {
     info!("Using software encoder (libx264)");
 
@@ -69,6 +87,27 @@ fn software(config: EncoderConfig) -> Result<Box<dyn Encoder>, ()> {
         config.framerate,
         config.bitrate_kbps,
     )?))
+}
+
+pub fn encoder_statuses() -> Vec<EncoderStatus> {
+    vec![
+        EncoderStatus {
+            name: "nvenc",
+            supported: true,
+            available: ffmpeg::encoder::find_by_name("h264_nvenc").is_some(),
+        },
+        EncoderStatus {
+            name: "vaapi",
+            supported: cfg!(target_os = "linux"),
+            available: cfg!(target_os = "linux")
+                && ffmpeg::encoder::find_by_name("h264_vaapi").is_some(),
+        },
+        EncoderStatus {
+            name: "libx264",
+            supported: true,
+            available: ffmpeg::encoder::find_by_name("libx264").is_some(),
+        },
+    ]
 }
 
 pub fn create_encoder(config: EncoderConfig) -> Result<Box<dyn Encoder>, ()> {

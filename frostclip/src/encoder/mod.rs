@@ -1,45 +1,18 @@
-use crate::frame::VideoFrame;
-use ffmpeg_sys_next as ffi;
+mod packet;
+mod platform;
+mod traits;
+mod video_info;
 
 pub mod factory;
-pub mod nvenc;
-pub mod nvenc_hw;
-pub mod software;
-pub mod vaapi;
-pub mod vaapi_hw;
 
-#[derive(Clone)]
-pub struct EncodedPacket {
-    pub data: Vec<u8>,
-    pub pts: i64,
-    pub dts: i64,
-    pub duration: i64,
-    pub is_keyframe: bool,
-}
+pub use factory::{EncoderConfig, EncoderStatus, create_encoder, encoder_statuses};
+pub use packet::EncodedPacket;
+pub use traits::Encoder;
+pub use video_info::VideoInfo;
 
-#[derive(Clone)]
-pub struct VideoInfo {
-    pub width: u32,
-    pub height: u32,
+use ffmpeg_sys_next as ffi;
 
-    pub time_base_num: i32,
-    pub time_base_den: i32,
-
-    pub codec: ffmpeg_next::codec::Id,
-    pub format: ffmpeg_next::format::Pixel,
-
-    pub extradata: Vec<u8>,
-}
-
-pub trait Encoder: Send {
-    fn submit(&mut self, frame: VideoFrame) -> Result<Vec<EncodedPacket>, ()>;
-
-    fn flush(&mut self) -> Result<Vec<EncodedPacket>, ()>;
-
-    fn video_info(&self) -> Option<VideoInfo>;
-}
-
-pub fn extract_codec_parameters(ctx: *const ffi::AVCodecContext) -> Option<Vec<u8>> {
+pub(crate) fn extract_codec_parameters(ctx: *const ffi::AVCodecContext) -> Option<Vec<u8>> {
     unsafe {
         let extradata_size = (*ctx).extradata_size;
 

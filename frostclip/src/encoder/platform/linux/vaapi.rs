@@ -1,8 +1,8 @@
 use ffmpeg_next as ffmpeg;
 use ffmpeg_sys_next::{av_buffer_ref, av_hwframe_get_buffer, av_hwframe_transfer_data};
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
-use crate::encoder::nvenc_hw::NvencHardware;
+use super::vaapi_hw::VaapiHardware;
 use crate::encoder::{EncodedPacket, Encoder, VideoInfo, extract_codec_parameters};
 use crate::frame::{VideoFormat, VideoFrame};
 
@@ -10,7 +10,7 @@ pub struct SendScaler(pub ffmpeg::software::scaling::Context);
 
 unsafe impl Send for SendScaler {}
 
-pub struct NvencEncoder {
+pub struct VaapiEncoder {
     width: u32,
     height: u32,
     frame_count: u64,
@@ -18,20 +18,21 @@ pub struct NvencEncoder {
 
     encoder: ffmpeg::codec::encoder::video::Encoder,
     scaler: SendScaler,
-    hw: NvencHardware,
+    hw: VaapiHardware,
 }
 
-impl NvencEncoder {
+impl VaapiEncoder {
     pub fn probe() -> bool {
-        info!("NVENC: probing hardware encoder");
+        info!("VAAPI: probing hardware encoder");
 
-        match ffmpeg::encoder::find_by_name("h264_nvenc") {
+        match ffmpeg::encoder::find_by_name("h264_vaapi") {
             Some(_) => {
-                info!("NVENC: h264_nvenc available");
+                info!("VAAPI: h264_vaapi available");
                 true
             }
+
             None => {
-                warn!("NVENC: h264_nvenc not available");
+                warn!("VAAPI: h264_vaapi not available");
                 false
             }
         }
@@ -40,12 +41,12 @@ impl NvencEncoder {
     pub fn new(width: u32, height: u32, framerate: u32, bitrate_kbps: u32) -> Result<Self, ()> {
         ffmpeg::init().unwrap();
 
-        let hw = NvencHardware::new(width, height).map_err(|err| {
-            error!("NVENC: failed to initialize CUDA hardware: {}", err);
-        })?;
+        let hw = VaapiHardware::new("/dev/dri/renderD128", width, height).map_err(|_| ())?;
 
-        let codec = ffmpeg::encoder::find_by_name("h264_nvenc").expect("h264_nvenc missing");
+        let codec = ffmpeg::encoder::find_by_name("h264_vaapi").expect("h264_vaapi missing");
+
         let context = ffmpeg::codec::context::Context::new_with_codec(codec);
+
         let mut encoder = context.encoder().video().unwrap();
 
         encoder.set_width(width);
@@ -58,32 +59,33 @@ impl NvencEncoder {
             (*encoder.as_mut_ptr()).hw_frames_ctx = av_buffer_ref(hw.frames_ctx());
         }
 
-        encoder.set_format(ffmpeg::format::Pixel::CUDA);
+        encoder.set_format(ffmpeg::format::Pixel::VAAPI);
 
+        // VBR rate control targeting bitrate_kbps.
+        //   maxrate = 1.5x (burst ceiling for complex scenes)
+        //   bufsize = 2x (VBV buffer, standard sizing)
+        //   bf = 0 (no B-frames, keeps replay latency low)
+        //   g = framerate (keyframe about every ~1 second)
         let maxrate = bitrate_kbps * 3 / 2;
         let bufsize = bitrate_kbps * 2;
 
         let mut options = ffmpeg::Dictionary::new();
-        options.set("rc", "vbr");
+        options.set("rc_mode", "VBR");
         options.set("b", &format!("{}k", bitrate_kbps));
         options.set("maxrate", &format!("{}k", maxrate));
         options.set("bufsize", &format!("{}k", bufsize));
         options.set("bf", "0");
         options.set("g", &format!("{}", framerate));
-        options.set("preset", "p4");
-        options.set("tune", "ll");
 
         info!(
-            "NVENC: opening encoder rc=VBR target={}k maxrate={}k bufsize={}k gop={} preset=p4 tune=ll",
+            "VAAPI: opening encoder rc=VBR bitrate={}k maxrate={}k bufsize={}k gop={}",
             bitrate_kbps, maxrate, bufsize, framerate
         );
 
-        let encoder = encoder.open_with(options).map_err(|err| {
-            error!("NVENC: failed to open encoder: {}", err);
-        })?;
+        let encoder = encoder.open_with(options).unwrap();
 
         info!(
-            "NVENC: encoder successfully opened. timebase={}/{}",
+            "VAAPI encoder opened timebase={}/{}",
             encoder.time_base().numerator(),
             encoder.time_base().denominator()
         );
@@ -133,7 +135,7 @@ impl NvencEncoder {
             self.last_packet_pts = Some(pts);
 
             info!(
-                "NVENC output packet pts={} dts={} duration={} key={}",
+                "VAAPI output packet pts={} dts={} duration={} key={}",
                 pts,
                 dts,
                 duration,
@@ -153,7 +155,7 @@ impl NvencEncoder {
     }
 }
 
-impl Encoder for NvencEncoder {
+impl Encoder for VaapiEncoder {
     fn submit(&mut self, frame: VideoFrame) -> Result<Vec<EncodedPacket>, ()> {
         let (data, width, height, stride, format, timestamp) = match frame {
             VideoFrame::Cpu {
@@ -165,14 +167,18 @@ impl Encoder for NvencEncoder {
                 timestamp,
             } => (data, width, height, stride, format, timestamp),
 
-            VideoFrame::LinuxDmaBuf(_) => {
-                error!("NVENC: VideoFrame::LinuxDmaBuf is not supported in CPU frame mode");
-                return Err(());
-            }
+            VideoFrame::LinuxDmaBuf(_) => return Err(()),
         };
 
         if format != VideoFormat::Rgba {
-            error!("NVENC: expected RGBA pixel format, found {:?}", format);
+            return Err(());
+        }
+
+        if width != self.width || height != self.height {
+            warn!(
+                "VAAPI: input dimensions {}x{} don't match encoder dimensions {}x{}",
+                width, height, self.width, self.height
+            );
             return Err(());
         }
 
@@ -192,30 +198,25 @@ impl Encoder for NvencEncoder {
         let mut nv12 =
             ffmpeg::util::frame::video::Video::new(ffmpeg::format::Pixel::NV12, width, height);
 
-        self.scaler.0.run(&src, &mut nv12).unwrap();
+        self.scaler.0.run(&src, &mut nv12).map_err(|err| {
+            warn!("VAAPI: RGBA->NV12 scaling failed: {err}");
+        })?;
 
         let mut hw_frame = ffmpeg::util::frame::video::Video::empty();
 
         unsafe {
             if av_hwframe_get_buffer(self.hw.frames_ctx(), hw_frame.as_mut_ptr(), 0) < 0 {
-                error!("NVENC: failed to allocate hardware memory frame");
                 return Err(());
             }
 
             if av_hwframe_transfer_data(hw_frame.as_mut_ptr(), nv12.as_ptr(), 0) < 0 {
-                error!("NVENC: failed to transfer frame data to GPU memory");
                 return Err(());
             }
 
             (*hw_frame.as_mut_ptr()).pts = timestamp as i64;
         }
 
-        self.encoder.send_frame(&hw_frame).map_err(|err| {
-            error!(
-                "NVENC: failed to submit frame to encoding hardware: {}",
-                err
-            );
-        })?;
+        self.encoder.send_frame(&hw_frame).map_err(|_| ())?;
 
         self.frame_count += 1;
 
@@ -223,15 +224,13 @@ impl Encoder for NvencEncoder {
     }
 
     fn flush(&mut self) -> Result<Vec<EncodedPacket>, ()> {
-        info!("NVENC flushing encoder");
+        info!("VAAPI flushing encoder");
 
-        self.encoder.send_eof().map_err(|err| {
-            error!("NVENC: failed to send EOF to flush: {}", err);
-        })?;
+        self.encoder.send_eof().map_err(|_| ())?;
 
         let packets = self.drain();
 
-        info!("NVENC flush returned {} packets", packets.len());
+        info!("VAAPI flush returned {} packets", packets.len());
 
         Ok(packets)
     }

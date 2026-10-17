@@ -53,13 +53,16 @@ fn log_desktop() {
 }
 
 fn log_encoders() {
-    let nvenc = ffmpeg_next::encoder::find_by_name("h264_nvenc").is_some();
-    let vaapi = ffmpeg_next::encoder::find_by_name("h264_vaapi").is_some();
-    let x264 = ffmpeg_next::encoder::find_by_name("libx264").is_some();
+    let statuses = crate::encoder::encoder_statuses();
 
-    info!("Encoders: nvenc={} vaapi={} libx264={}", nvenc, vaapi, x264);
+    for status in &statuses {
+        info!(
+            "Encoder {}: supported={} available={}",
+            status.name, status.supported, status.available
+        );
+    }
 
-    if !nvenc && !vaapi && !x264 {
+    if !statuses.iter().any(|status| status.available) {
         warn!("No H.264 encoders available. FrostClip will not be able to encode.");
     }
 }
