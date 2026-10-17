@@ -1,3 +1,7 @@
+mod dmabuf;
+
+pub use dmabuf::DmaBufFrame;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VideoFormat {
     Unknown,
@@ -19,16 +23,4 @@ pub enum VideoFrame {
         format: VideoFormat,
         timestamp: u64,
     },
-}
-
-#[derive(Debug)]
-pub struct DmaBufFrame {
-    pub fd: i32,
-    pub width: u32,
-    pub height: u32,
-    pub stride: u32,
-    pub offset: u32,
-    pub modifier: u64,
-    pub format: VideoFormat,
-    pub timestamp: u64,
 }

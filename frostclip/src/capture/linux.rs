@@ -1,5 +1,5 @@
 use crate::capture::{CaptureBackend, CaptureInfo};
-use crate::frame::{VideoFormat, VideoFrame};
+use crate::frame::{DmaBufFrame, VideoFormat, VideoFrame};
 use crate::portal::screencast::PortalStream;
 
 use pipewire as pw;
@@ -78,8 +78,11 @@ impl LinuxCapture {
         })
     }
 
-    fn build_format_params() -> Result<Vec<u8>, ()> {
-        let obj = object! {
+    fn build_format_params(with_modifiers: bool) -> Result<Vec<u8>, ()> {
+        use pw::spa::pod::{ChoiceValue, Property, PropertyFlags, Value};
+        use pw::spa::utils::{Choice, ChoiceEnum, ChoiceFlags};
+
+        let mut obj = object! {
             pw::spa::utils::SpaTypes::ObjectParamFormat,
             pw::spa::param::ParamType::EnumFormat,
             property!(FormatProperties::MediaType, Id, MediaType::Video),
@@ -127,6 +130,23 @@ impl LinuxCapture {
             ),
         };
 
+        if with_modifiers {
+            obj.properties.insert(
+                3,
+                Property {
+                    key: FormatProperties::VideoModifier.as_raw(),
+                    flags: PropertyFlags::MANDATORY | PropertyFlags::DONT_FIXATE,
+                    value: Value::Choice(ChoiceValue::Long(Choice(
+                        ChoiceFlags::empty(),
+                        ChoiceEnum::Enum {
+                            default: 0,
+                            alternatives: vec![0, 0x00ff_ffff_ffff_ffff],
+                        },
+                    ))),
+                },
+            );
+        }
+
         pw::spa::pod::serialize::PodSerializer::serialize(
             std::io::Cursor::new(Vec::new()),
             &pw::spa::pod::Value::Object(obj),
@@ -160,7 +180,11 @@ impl LinuxCapture {
                 Property {
                     key: pw::spa::sys::SPA_PARAM_BUFFERS_dataType,
                     flags: PropertyFlags::empty(),
-                    value: Value::Int(1 << pw::spa::sys::SPA_DATA_MemPtr),
+                    value: Value::Int(
+                        (1 << pw::spa::sys::SPA_DATA_MemPtr)
+                            | (1 << pw::spa::sys::SPA_DATA_MemFd)
+                            | (1 << pw::spa::sys::SPA_DATA_DmaBuf),
+                    ),
                 },
             ],
         };
@@ -177,8 +201,9 @@ impl LinuxCapture {
 
     fn start_capture(&mut self, callback: FrameCallback) -> Result<(), ()> {
         let portal = self.portal.take().ok_or(())?;
-        let params_bytes = Self::build_format_params()?;
         let buffer_bytes = Self::build_buffer_params()?;
+        let modifier_bytes = Self::build_format_params(true)?;
+        let plain_bytes = Self::build_format_params(false)?;
         let expected = (self.info.width, self.info.height);
 
         let (quit_sender, quit_receiver) = pw::channel::channel::<()>();
@@ -301,6 +326,8 @@ impl LinuxCapture {
                             size.width, size.height, state.expected.0, state.expected.1
                         );
                     }
+
+                    info!("PIPEWIRE: modifier=0x{:x}", state.format.modifier());
                 })
                 .process(|stream, state| {
                     let Some(mut buffer) = stream.dequeue_buffer() else {
@@ -333,6 +360,82 @@ impl LinuxCapture {
 
                     if chunk_size == 0 {
                         debug!("PIPEWIRE: empty chunk, skipping");
+                        return;
+                    }
+
+                    if data.type_() == pw::spa::buffer::DataType::DmaBuf {
+                        let size = state.format.size();
+                        let raw_fd = data.fd();
+                        let borrowed = unsafe { std::os::fd::BorrowedFd::borrow_raw(raw_fd) };
+                        let owned = match borrowed.try_clone_to_owned() {
+                            Ok(fd) => fd,
+                            Err(err) => {
+                                error!("PIPEWIRE: failed to dup dma-buf fd: {}", err);
+                                return;
+                            }
+                        };
+
+                        let raw_format = state.format.format().as_raw();
+                        let format = if raw_format == SpaVideoFormat::BGRx.as_raw()
+                            || raw_format == SpaVideoFormat::BGRA.as_raw()
+                        {
+                            VideoFormat::Bgra
+                        } else {
+                            VideoFormat::Rgba
+                        };
+
+                        let stride = if chunk_stride > 0 {
+                            chunk_stride as u32
+                        } else {
+                            size.width * 4
+                        };
+
+                        state.frames += 1;
+
+                        if state.frames == 1 || state.frames % 60 == 0 {
+                            info!(
+                                "PIPEWIRE: frame #{} dma-buf {}x{} t={:.2}s",
+                                state.frames,
+                                size.width,
+                                size.height,
+                                state.started.elapsed().as_secs_f64()
+                            );
+                        }
+
+                        let frame = VideoFrame::LinuxDmaBuf(DmaBufFrame {
+                            fd: owned,
+                            width: size.width,
+                            height: size.height,
+                            stride,
+                            offset: chunk_offset as u32,
+                            modifier: state.format.modifier(),
+                            format,
+                            timestamp: state.started.elapsed().as_micros() as u64,
+                        });
+
+                        drop(buffer);
+
+                        let VideoFrame::LinuxDmaBuf(dma) = frame else {
+                            return;
+                        };
+
+                        let t_read = Instant::now();
+                        match dma.into_cpu() {
+                            Ok(cpu) => {
+                                let read_us = t_read.elapsed().as_micros();
+                                let t_cb = Instant::now();
+                                (state.callback)(cpu);
+                                let cb_us = t_cb.elapsed().as_micros();
+                                if state.frames % 60 == 0 {
+                                    info!(
+                                        "PIPEWIRE: timing read={}us callback={}us",
+                                        read_us, cb_us
+                                    );
+                                }
+                            }
+                            Err(err) => error!("PIPEWIRE: dma-buf CPU read failed: {}", err),
+                        }
+                        return;
                         return;
                     }
 
@@ -425,10 +528,18 @@ impl LinuxCapture {
                 }
             };
 
-            let format_pod = match Pod::from_bytes(&params_bytes) {
+            let modifier_pod = match Pod::from_bytes(&modifier_bytes) {
                 Some(pod) => pod,
                 None => {
-                    error!("PIPEWIRE: invalid format pod");
+                    error!("PIPEWIRE: invalid modifier format pod");
+                    return;
+                }
+            };
+
+            let plain_pod = match Pod::from_bytes(&plain_bytes) {
+                Some(pod) => pod,
+                None => {
+                    error!("PIPEWIRE: invalid plain format pod");
                     return;
                 }
             };
@@ -441,7 +552,7 @@ impl LinuxCapture {
                 }
             };
 
-            let mut params = [format_pod, buffer_pod];
+            let mut params = [modifier_pod, plain_pod, buffer_pod];
 
             if let Err(err) = stream.connect(
                 pw::spa::utils::Direction::Input,

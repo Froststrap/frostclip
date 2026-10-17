@@ -16,6 +16,7 @@ authors = [
 dirs = "6.0"
 ffmpeg-next = "8.1"
 ffmpeg-sys-next = "8.1"
+libc = "0.2"
 toml = "1.1.4"
 tracing = "0.1.44"
 
