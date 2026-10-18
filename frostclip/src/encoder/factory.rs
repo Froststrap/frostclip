@@ -58,6 +58,8 @@ fn try_vaapi(config: EncoderConfig) -> Option<Box<dyn Encoder>> {
     info!("Using VAAPI encoder");
 
     match VaapiEncoder::new(
+        config.input_width,
+        config.input_height,
         config.output_width,
         config.output_height,
         config.framerate,

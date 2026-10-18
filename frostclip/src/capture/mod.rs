@@ -9,7 +9,11 @@ pub struct CaptureInfo {
 }
 
 pub trait CaptureBackend {
-    fn start(&mut self, callback: Box<dyn Fn(VideoFrame) + Send + Sync>) -> Result<(), ()>;
+    fn start(
+        &mut self,
+        callback: Box<dyn Fn(VideoFrame) + Send + Sync>,
+        accepts_dmabuf: bool,
+    ) -> Result<(), ()>;
 
     fn stop(&mut self) -> Result<(), ()>;
 
@@ -29,8 +33,12 @@ impl Capture {
         })
     }
 
-    pub fn start(&mut self, callback: Box<dyn Fn(VideoFrame) + Send + Sync>) -> Result<(), ()> {
-        self.backend.start(callback)
+    pub fn start(
+        &mut self,
+        callback: Box<dyn Fn(VideoFrame) + Send + Sync>,
+        accepts_dmabuf: bool,
+    ) -> Result<(), ()> {
+        self.backend.start(callback, accepts_dmabuf)
     }
 
     pub fn stop(&mut self) -> Result<(), ()> {

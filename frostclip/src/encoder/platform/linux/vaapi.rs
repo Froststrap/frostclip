@@ -1,10 +1,16 @@
+use ffmpeg::util::frame::video::Video;
 use ffmpeg_next as ffmpeg;
-use ffmpeg_sys_next::{av_buffer_ref, av_hwframe_get_buffer, av_hwframe_transfer_data};
+use ffmpeg_sys_next::{
+    av_buffer_ref, av_frame_ref, av_hwframe_get_buffer, av_hwframe_transfer_data,
+};
+use std::time::Instant;
 use tracing::{info, warn};
 
+use super::drm_frame::drm_prime_frame;
+use super::vaapi_graph::VaapiGraph;
 use super::vaapi_hw::VaapiHardware;
 use crate::encoder::{EncodedPacket, Encoder, VideoInfo, extract_codec_parameters};
-use crate::frame::{VideoFormat, VideoFrame};
+use crate::frame::{DmaBufFrame, VideoFormat, VideoFrame};
 
 pub struct SendScaler(pub ffmpeg::software::scaling::Context);
 
@@ -13,12 +19,20 @@ unsafe impl Send for SendScaler {}
 pub struct VaapiEncoder {
     width: u32,
     height: u32,
+    input_width: u32,
+    input_height: u32,
+
     frame_count: u64,
     last_packet_pts: Option<i64>,
 
     encoder: ffmpeg::codec::encoder::video::Encoder,
     scaler: SendScaler,
-    hw: VaapiHardware,
+    hw: Option<VaapiHardware>,
+    graph: Option<VaapiGraph>,
+    last_out: Option<Video>,
+    last_sent_pts: i64,
+    next_due: Instant,
+    interval_us: i64,
 }
 
 impl VaapiEncoder {
@@ -38,10 +52,36 @@ impl VaapiEncoder {
         }
     }
 
-    pub fn new(width: u32, height: u32, framerate: u32, bitrate_kbps: u32) -> Result<Self, ()> {
+    pub fn new(
+        input_width: u32,
+        input_height: u32,
+        width: u32,
+        height: u32,
+        framerate: u32,
+        bitrate_kbps: u32,
+    ) -> Result<Self, ()> {
         ffmpeg::init().unwrap();
 
-        let hw = VaapiHardware::new("/dev/dri/renderD128", width, height).map_err(|_| ())?;
+        let mut graph = match VaapiGraph::new(
+            "/dev/dri/renderD128",
+            input_width,
+            input_height,
+            width,
+            height,
+            framerate,
+        ) {
+            Ok(graph) => Some(graph),
+            Err(err) => {
+                warn!("VAAPI: dma-buf graph unavailable, CPU path only: {err}");
+                None
+            }
+        };
+
+        let hw = if graph.is_some() {
+            None
+        } else {
+            Some(VaapiHardware::new("/dev/dri/renderD128", width, height).map_err(|_| ())?)
+        };
 
         let codec = ffmpeg::encoder::find_by_name("h264_vaapi").expect("h264_vaapi missing");
 
@@ -54,9 +94,24 @@ impl VaapiEncoder {
         encoder.set_time_base(ffmpeg::Rational::new(1, 1_000_000));
         encoder.set_frame_rate(Some(ffmpeg::Rational::new(framerate as i32, 1)));
         encoder.set_flags(ffmpeg::codec::Flags::GLOBAL_HEADER);
+        encoder.set_colorspace(ffmpeg::color::Space::BT709);
+        encoder.set_color_range(ffmpeg::color::Range::MPEG);
 
         unsafe {
-            (*encoder.as_mut_ptr()).hw_frames_ctx = av_buffer_ref(hw.frames_ctx());
+            (*encoder.as_mut_ptr()).color_primaries =
+                ffmpeg_sys_next::AVColorPrimaries::AVCOL_PRI_BT709;
+            (*encoder.as_mut_ptr()).color_trc =
+                ffmpeg_sys_next::AVColorTransferCharacteristic::AVCOL_TRC_BT709;
+        }
+
+        let frames_ctx = match (&mut graph, &hw) {
+            (Some(graph), _) => graph.hw_frames_ctx(),
+            (None, Some(hw)) => hw.frames_ctx(),
+            _ => return Err(()),
+        };
+
+        unsafe {
+            (*encoder.as_mut_ptr()).hw_frames_ctx = av_buffer_ref(frames_ctx);
         }
 
         encoder.set_format(ffmpeg::format::Pixel::VAAPI);
@@ -93,8 +148,8 @@ impl VaapiEncoder {
         let scaler = SendScaler(
             ffmpeg::software::scaling::Context::get(
                 ffmpeg::format::Pixel::RGBA,
-                width,
-                height,
+                input_width,
+                input_height,
                 ffmpeg::format::Pixel::NV12,
                 width,
                 height,
@@ -106,12 +161,96 @@ impl VaapiEncoder {
         Ok(Self {
             width,
             height,
+            input_width,
+            input_height,
             frame_count: 0,
             last_packet_pts: None,
             encoder,
             scaler,
             hw,
+            graph,
+            last_out: None,
+            last_sent_pts: -1,
+            next_due: Instant::now(),
+            interval_us: 1_000_000 / framerate as i64,
         })
+    }
+
+    fn frames_ctx(&mut self) -> *mut ffmpeg_sys_next::AVBufferRef {
+        match (&mut self.graph, &self.hw) {
+            (Some(graph), _) => graph.hw_frames_ctx(),
+            (_, Some(hw)) => hw.frames_ctx(),
+            _ => std::ptr::null_mut(),
+        }
+    }
+
+    fn submit_dmabuf(&mut self, dma: DmaBufFrame) -> Result<Vec<EncodedPacket>, ()> {
+        let Some(graph) = self.graph.as_mut() else {
+            return Err(());
+        };
+
+        if dma.width != self.input_width || dma.height != self.input_height {
+            warn!(
+                "VAAPI: dma-buf dimensions {}x{} don't match capture dimensions {}x{}",
+                dma.width, dma.height, self.input_width, self.input_height
+            );
+            return Err(());
+        }
+
+        let frame = drm_prime_frame(dma, graph.drm_frames_ctx()).map_err(|err| {
+            warn!("VAAPI: DRM frame build failed: {err}");
+        })?;
+
+        graph.push(&frame).map_err(|err| {
+            warn!("VAAPI: {err}");
+        })?;
+
+        let mut outs = Vec::new();
+
+        loop {
+            let mut out = Video::empty();
+
+            if graph.pull(&mut out).is_err() {
+                break;
+            }
+
+            outs.push(out);
+        }
+
+        for out in outs {
+            self.send_out(out)?;
+        }
+
+        self.frame_count += 1;
+
+        Ok(self.drain())
+    }
+
+    fn send_out(&mut self, mut out: Video) -> Result<(), ()> {
+        let pts = unsafe { (*out.as_ptr()).pts };
+        let pts = if pts <= self.last_sent_pts {
+            self.last_sent_pts + 1
+        } else {
+            pts
+        };
+
+        unsafe {
+            (*out.as_mut_ptr()).pts = pts;
+        }
+
+        let mut keep = Video::empty();
+        let ret = unsafe { av_frame_ref(keep.as_mut_ptr(), out.as_ptr()) };
+        if ret >= 0 {
+            self.last_out = Some(keep);
+        }
+
+        self.encoder.send_frame(&out).map_err(|_| ())?;
+
+        self.last_sent_pts = pts;
+        self.next_due =
+            Instant::now() + std::time::Duration::from_micros((self.interval_us * 3 / 2) as u64);
+
+        Ok(())
     }
 
     pub fn drain(&mut self) -> Vec<EncodedPacket> {
@@ -157,6 +296,13 @@ impl VaapiEncoder {
 
 impl Encoder for VaapiEncoder {
     fn submit(&mut self, frame: VideoFrame) -> Result<Vec<EncodedPacket>, ()> {
+        let frame = match frame {
+            VideoFrame::LinuxDmaBuf(dma) => return self.submit_dmabuf(dma),
+            other => other,
+        };
+
+        let frames_ctx = self.frames_ctx();
+
         let (data, width, height, stride, format, timestamp) = match frame {
             VideoFrame::Cpu {
                 data,
@@ -174,10 +320,10 @@ impl Encoder for VaapiEncoder {
             return Err(());
         }
 
-        if width != self.width || height != self.height {
+        if width != self.input_width || height != self.input_height {
             warn!(
-                "VAAPI: input dimensions {}x{} don't match encoder dimensions {}x{}",
-                width, height, self.width, self.height
+                "VAAPI: input dimensions {}x{} don't match capture dimensions {}x{}",
+                width, height, self.input_width, self.input_height
             );
             return Err(());
         }
@@ -195,8 +341,11 @@ impl Encoder for VaapiEncoder {
                 .copy_from_slice(&data[src_start..src_start + width as usize * 4]);
         }
 
-        let mut nv12 =
-            ffmpeg::util::frame::video::Video::new(ffmpeg::format::Pixel::NV12, width, height);
+        let mut nv12 = ffmpeg::util::frame::video::Video::new(
+            ffmpeg::format::Pixel::NV12,
+            self.width,
+            self.height,
+        );
 
         self.scaler.0.run(&src, &mut nv12).map_err(|err| {
             warn!("VAAPI: RGBA->NV12 scaling failed: {err}");
@@ -205,7 +354,7 @@ impl Encoder for VaapiEncoder {
         let mut hw_frame = ffmpeg::util::frame::video::Video::empty();
 
         unsafe {
-            if av_hwframe_get_buffer(self.hw.frames_ctx(), hw_frame.as_mut_ptr(), 0) < 0 {
+            if av_hwframe_get_buffer(frames_ctx, hw_frame.as_mut_ptr(), 0) < 0 {
                 return Err(());
             }
 
@@ -216,7 +365,7 @@ impl Encoder for VaapiEncoder {
             (*hw_frame.as_mut_ptr()).pts = timestamp as i64;
         }
 
-        self.encoder.send_frame(&hw_frame).map_err(|_| ())?;
+        self.send_out(hw_frame)?;
 
         self.frame_count += 1;
 
@@ -253,5 +402,38 @@ impl Encoder for VaapiEncoder {
             codec: ffmpeg::codec::Id::H264,
             format: ffmpeg::format::Pixel::YUV420P,
         })
+    }
+
+    fn accepts_dmabuf(&self) -> bool {
+        self.graph.is_some()
+    }
+
+    fn repeat_last(&mut self) -> Result<Vec<EncodedPacket>, ()> {
+        if Instant::now() < self.next_due {
+            return Ok(Vec::new());
+        }
+
+        let due = self.next_due;
+
+        let Some(last) = self.last_out.as_ref() else {
+            return Ok(Vec::new());
+        };
+
+        let mut copy = Video::empty();
+        let ret = unsafe { av_frame_ref(copy.as_mut_ptr(), last.as_ptr()) };
+        if ret < 0 {
+            return Err(());
+        }
+
+        unsafe {
+            (*copy.as_mut_ptr()).pts = self.last_sent_pts + self.interval_us;
+        }
+
+        self.send_out(copy)?;
+
+        self.next_due =
+            (due + std::time::Duration::from_micros(self.interval_us as u64)).max(Instant::now());
+
+        Ok(self.drain())
     }
 }

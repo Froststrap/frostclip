@@ -120,59 +120,92 @@ impl CaptureEngine {
 
         let fps_count = Arc::clone(&frame_count);
         let fps_timer = Arc::clone(&fps_start);
+        let accepts_dmabuf = lock(&self.encoder).accepts_dmabuf();
 
         *lock(&running) = true;
 
         self.capture
-            .start(Box::new(move |frame| {
-                if !*lock(&running) {
-                    return;
-                }
-
-                let elapsed = {
-                    let mut count = lock(&fps_count);
-                    *count += 1;
-
-                    let mut timer = lock(&fps_timer);
-                    let elapsed = timer.elapsed();
-
-                    if elapsed.as_secs_f64() >= 1.0 {
-                        info!(
-                            "ENGINE: capture FPS={:.2} frames={}",
-                            *count as f64 / elapsed.as_secs_f64(),
-                            *count
-                        );
-
-                        *count = 0;
-                        *timer = std::time::Instant::now();
-                    }
-
-                    elapsed
-                };
-
-                let t0 = std::time::Instant::now();
-
-                let packets = match lock(&encoder).submit(frame) {
-                    Ok(packets) => packets,
-                    Err(_) => {
-                        error!("ENGINE: encoder submit failed");
+            .start(
+                Box::new(move |frame| {
+                    if !*lock(&running) {
                         return;
                     }
+
+                    let elapsed = {
+                        let mut count = lock(&fps_count);
+                        *count += 1;
+
+                        let mut timer = lock(&fps_timer);
+                        let elapsed = timer.elapsed();
+
+                        if elapsed.as_secs_f64() >= 1.0 {
+                            info!(
+                                "ENGINE: capture FPS={:.2} frames={}",
+                                *count as f64 / elapsed.as_secs_f64(),
+                                *count
+                            );
+
+                            *count = 0;
+                            *timer = std::time::Instant::now();
+                        }
+
+                        elapsed
+                    };
+
+                    let t0 = std::time::Instant::now();
+
+                    let packets = match lock(&encoder).submit(frame) {
+                        Ok(packets) => packets,
+                        Err(_) => {
+                            error!("ENGINE: encoder submit failed");
+                            return;
+                        }
+                    };
+
+                    debug!(
+                        "ENGINE: encoder submit={:.2}ms packets={}",
+                        t0.elapsed().as_secs_f64() * 1000.0,
+                        packets.len()
+                    );
+
+                    let mut buffer = lock(&buffer);
+
+                    for packet in packets {
+                        buffer.push(packet);
+                    }
+                }),
+                accepts_dmabuf,
+            )
+            .map_err(|_| EngineError::Capture)?;
+
+        let tick = std::time::Duration::from_micros(1_000_000 / self.config.framerate as u64 / 4);
+        let idle_encoder = Arc::clone(&self.encoder);
+        let idle_buffer = Arc::clone(&self.buffer);
+        let idle_running = Arc::clone(&self.running);
+
+        std::thread::spawn(move || {
+            while *lock(&idle_running) {
+                std::thread::sleep(tick);
+
+                let packets = match lock(&idle_encoder).repeat_last() {
+                    Ok(packets) => packets,
+                    Err(_) => {
+                        error!("ENGINE: repeat_last failed");
+                        continue;
+                    }
                 };
 
-                debug!(
-                    "ENGINE: encoder submit={:.2}ms packets={}",
-                    t0.elapsed().as_secs_f64() * 1000.0,
-                    packets.len()
-                );
+                if packets.is_empty() {
+                    continue;
+                }
 
-                let mut buffer = lock(&buffer);
+                let mut buffer = lock(&idle_buffer);
 
                 for packet in packets {
                     buffer.push(packet);
                 }
-            }))
-            .map_err(|_| EngineError::Capture)?;
+            }
+        });
 
         info!("ENGINE: capture started");
 

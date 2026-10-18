@@ -8,4 +8,12 @@ pub trait Encoder: Send {
     fn flush(&mut self) -> Result<Vec<EncodedPacket>, ()>;
 
     fn video_info(&self) -> Option<VideoInfo>;
+
+    fn accepts_dmabuf(&self) -> bool {
+        false
+    }
+
+    fn repeat_last(&mut self) -> Result<Vec<EncodedPacket>, ()> {
+        Ok(Vec::new())
+    }
 }

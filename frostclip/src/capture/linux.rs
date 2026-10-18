@@ -22,6 +22,7 @@ struct StreamState {
     logged_no_map: bool,
     logged_type: bool,
     frames: u64,
+    accepts_dmabuf: bool,
 }
 
 pub struct LinuxCapture {
@@ -157,7 +158,7 @@ impl LinuxCapture {
         })
     }
 
-    fn build_buffer_params() -> Result<Vec<u8>, ()> {
+    fn build_buffer_params(allow_dmabuf: bool) -> Result<Vec<u8>, ()> {
         use pw::spa::pod::{ChoiceValue, Object, Property, PropertyFlags, Value};
         use pw::spa::utils::{Choice, ChoiceEnum, ChoiceFlags};
 
@@ -183,7 +184,11 @@ impl LinuxCapture {
                     value: Value::Int(
                         (1 << pw::spa::sys::SPA_DATA_MemPtr)
                             | (1 << pw::spa::sys::SPA_DATA_MemFd)
-                            | (1 << pw::spa::sys::SPA_DATA_DmaBuf),
+                            | if allow_dmabuf {
+                                1 << pw::spa::sys::SPA_DATA_DmaBuf
+                            } else {
+                                0
+                            },
                     ),
                 },
             ],
@@ -199,9 +204,9 @@ impl LinuxCapture {
         })
     }
 
-    fn start_capture(&mut self, callback: FrameCallback) -> Result<(), ()> {
+    fn start_capture(&mut self, callback: FrameCallback, accepts_dmabuf: bool) -> Result<(), ()> {
         let portal = self.portal.take().ok_or(())?;
-        let buffer_bytes = Self::build_buffer_params()?;
+        let buffer_bytes = Self::build_buffer_params(accepts_dmabuf)?;
         let modifier_bytes = Self::build_format_params(true)?;
         let plain_bytes = Self::build_format_params(false)?;
         let expected = (self.info.width, self.info.height);
@@ -274,6 +279,7 @@ impl LinuxCapture {
                 logged_no_map: false,
                 logged_type: false,
                 frames: 0,
+                accepts_dmabuf,
             };
 
             let _listener = match stream
@@ -384,6 +390,16 @@ impl LinuxCapture {
                             VideoFormat::Rgba
                         };
 
+                        let fourcc: u32 = if raw_format == SpaVideoFormat::BGRx.as_raw() {
+                            0x3432_5258
+                        } else if raw_format == SpaVideoFormat::BGRA.as_raw() {
+                            0x3432_5241
+                        } else if raw_format == SpaVideoFormat::RGBx.as_raw() {
+                            0x3432_4258
+                        } else {
+                            0x3432_4241
+                        };
+
                         let stride = if chunk_stride > 0 {
                             chunk_stride as u32
                         } else {
@@ -409,11 +425,17 @@ impl LinuxCapture {
                             stride,
                             offset: chunk_offset as u32,
                             modifier: state.format.modifier(),
+                            fourcc,
                             format,
                             timestamp: state.started.elapsed().as_micros() as u64,
                         });
 
                         drop(buffer);
+
+                        if state.accepts_dmabuf {
+                            (state.callback)(frame);
+                            return;
+                        }
 
                         let VideoFrame::LinuxDmaBuf(dma) = frame else {
                             return;
@@ -552,7 +574,11 @@ impl LinuxCapture {
                 }
             };
 
-            let mut params = [modifier_pod, plain_pod, buffer_pod];
+            let mut params = if accepts_dmabuf {
+                vec![modifier_pod, plain_pod, buffer_pod]
+            } else {
+                vec![plain_pod, buffer_pod]
+            };
 
             if let Err(err) = stream.connect(
                 pw::spa::utils::Direction::Input,
@@ -594,8 +620,12 @@ impl LinuxCapture {
 }
 
 impl CaptureBackend for LinuxCapture {
-    fn start(&mut self, callback: Box<dyn Fn(VideoFrame) + Send + Sync>) -> Result<(), ()> {
-        self.start_capture(callback)
+    fn start(
+        &mut self,
+        callback: Box<dyn Fn(VideoFrame) + Send + Sync>,
+        accepts_dmabuf: bool,
+    ) -> Result<(), ()> {
+        self.start_capture(callback, accepts_dmabuf)
     }
 
     fn info(&self) -> CaptureInfo {
