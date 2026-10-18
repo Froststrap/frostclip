@@ -1,5 +1,9 @@
+use ffmpeg::util::frame::video::Video;
 use ffmpeg_next as ffmpeg;
-use ffmpeg_sys_next::{av_buffer_ref, av_hwframe_get_buffer, av_hwframe_transfer_data};
+use ffmpeg_sys_next::{
+    av_buffer_ref, av_frame_ref, av_hwframe_get_buffer, av_hwframe_transfer_data,
+};
+use std::time::Instant;
 use tracing::{info, warn};
 
 use super::drm_frame::drm_prime_frame;
@@ -25,6 +29,10 @@ pub struct VaapiEncoder {
     scaler: SendScaler,
     hw: Option<VaapiHardware>,
     graph: Option<VaapiGraph>,
+    last_out: Option<Video>,
+    last_sent_pts: i64,
+    next_due: Instant,
+    interval_us: i64,
 }
 
 impl VaapiEncoder {
@@ -161,6 +169,10 @@ impl VaapiEncoder {
             scaler,
             hw,
             graph,
+            last_out: None,
+            last_sent_pts: -1,
+            next_due: Instant::now(),
+            interval_us: 1_000_000 / framerate as i64,
         })
     }
 
@@ -193,19 +205,52 @@ impl VaapiEncoder {
             warn!("VAAPI: {err}");
         })?;
 
+        let mut outs = Vec::new();
+
         loop {
-            let mut out = ffmpeg::util::frame::video::Video::empty();
+            let mut out = Video::empty();
 
             if graph.pull(&mut out).is_err() {
                 break;
             }
 
-            self.encoder.send_frame(&out).map_err(|_| ())?;
+            outs.push(out);
+        }
+
+        for out in outs {
+            self.send_out(out)?;
         }
 
         self.frame_count += 1;
 
         Ok(self.drain())
+    }
+
+    fn send_out(&mut self, mut out: Video) -> Result<(), ()> {
+        let pts = unsafe { (*out.as_ptr()).pts };
+        let pts = if pts <= self.last_sent_pts {
+            self.last_sent_pts + 1
+        } else {
+            pts
+        };
+
+        unsafe {
+            (*out.as_mut_ptr()).pts = pts;
+        }
+
+        let mut keep = Video::empty();
+        let ret = unsafe { av_frame_ref(keep.as_mut_ptr(), out.as_ptr()) };
+        if ret >= 0 {
+            self.last_out = Some(keep);
+        }
+
+        self.encoder.send_frame(&out).map_err(|_| ())?;
+
+        self.last_sent_pts = pts;
+        self.next_due =
+            Instant::now() + std::time::Duration::from_micros((self.interval_us * 3 / 2) as u64);
+
+        Ok(())
     }
 
     pub fn drain(&mut self) -> Vec<EncodedPacket> {
@@ -320,7 +365,7 @@ impl Encoder for VaapiEncoder {
             (*hw_frame.as_mut_ptr()).pts = timestamp as i64;
         }
 
-        self.encoder.send_frame(&hw_frame).map_err(|_| ())?;
+        self.send_out(hw_frame)?;
 
         self.frame_count += 1;
 
@@ -361,5 +406,34 @@ impl Encoder for VaapiEncoder {
 
     fn accepts_dmabuf(&self) -> bool {
         self.graph.is_some()
+    }
+
+    fn repeat_last(&mut self) -> Result<Vec<EncodedPacket>, ()> {
+        if Instant::now() < self.next_due {
+            return Ok(Vec::new());
+        }
+
+        let due = self.next_due;
+
+        let Some(last) = self.last_out.as_ref() else {
+            return Ok(Vec::new());
+        };
+
+        let mut copy = Video::empty();
+        let ret = unsafe { av_frame_ref(copy.as_mut_ptr(), last.as_ptr()) };
+        if ret < 0 {
+            return Err(());
+        }
+
+        unsafe {
+            (*copy.as_mut_ptr()).pts = self.last_sent_pts + self.interval_us;
+        }
+
+        self.send_out(copy)?;
+
+        self.next_due =
+            (due + std::time::Duration::from_micros(self.interval_us as u64)).max(Instant::now());
+
+        Ok(self.drain())
     }
 }

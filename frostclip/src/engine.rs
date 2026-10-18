@@ -178,6 +178,35 @@ impl CaptureEngine {
             )
             .map_err(|_| EngineError::Capture)?;
 
+        let tick = std::time::Duration::from_micros(1_000_000 / self.config.framerate as u64 / 4);
+        let idle_encoder = Arc::clone(&self.encoder);
+        let idle_buffer = Arc::clone(&self.buffer);
+        let idle_running = Arc::clone(&self.running);
+
+        std::thread::spawn(move || {
+            while *lock(&idle_running) {
+                std::thread::sleep(tick);
+
+                let packets = match lock(&idle_encoder).repeat_last() {
+                    Ok(packets) => packets,
+                    Err(_) => {
+                        error!("ENGINE: repeat_last failed");
+                        continue;
+                    }
+                };
+
+                if packets.is_empty() {
+                    continue;
+                }
+
+                let mut buffer = lock(&idle_buffer);
+
+                for packet in packets {
+                    buffer.push(packet);
+                }
+            }
+        });
+
         info!("ENGINE: capture started");
 
         Ok(())

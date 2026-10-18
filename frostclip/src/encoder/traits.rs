@@ -12,4 +12,8 @@ pub trait Encoder: Send {
     fn accepts_dmabuf(&self) -> bool {
         false
     }
+
+    fn repeat_last(&mut self) -> Result<Vec<EncodedPacket>, ()> {
+        Ok(Vec::new())
+    }
 }
