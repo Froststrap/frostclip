@@ -20,6 +20,9 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install ffmpeg 
+        uses: AnimMouse/setup-ffmpeg@v1
+
       - name: Cache Rust
         uses: Swatinem/rust-cache@v2
 
@@ -28,19 +31,10 @@ jobs:
           sudo apt update
           sudo apt install -y \
             pkg-config \
-            libavcodec-dev \
-            libavformat-dev \
-            libavutil-dev \
-            libavfilter-dev \
-            libswscale-dev \
-            libva-dev \
-            libva-drm2 \
             libpipewire-0.3-dev \
             libspa-0.2-dev \
-            libclang-dev \
-            libavdevice-dev \
-            libswresample-dev \
-            upx
+            libva-drm2 \
+            libclang-dev
 
       - name: Build
         run: cargo b -r
@@ -56,7 +50,16 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
-      - uses: AnimMouse/setup-ffmpeg@v1
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install ffmpeg 
+        uses: AnimMouse/setup-ffmpeg@v1
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+
       - name: Build
         run: cargo b -r
 
