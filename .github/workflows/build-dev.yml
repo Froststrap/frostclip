@@ -5,7 +5,7 @@ on:
   pull_request:
 
 jobs:
-  dev:
+  linux:
     runs-on: ubuntu-26.04
 
     steps:
@@ -47,7 +47,7 @@ jobs:
           name: frostclip-dev-linux
           path: target/debug/frostclip
           retention-days: 7
-  dev:
+  macos:
     runs-on: macos-latest
 
     steps:
@@ -61,5 +61,5 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: frostclip-dev-macos
-          path: target/release/frostclip
+          path: target/debug/frostclip
           retention-days: 7
