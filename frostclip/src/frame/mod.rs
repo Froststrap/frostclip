@@ -18,8 +18,6 @@ pub enum VideoFormat {
 #[derive(Debug)]
 pub enum VideoFrame {
     LinuxDmaBuf(DmaBufFrame),
-
-    #[cfg(target_os = "macos")]
     MacIoSurface(IoSurfaceFrame),
 
     Cpu {
