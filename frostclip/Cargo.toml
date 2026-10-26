@@ -6,6 +6,7 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
+libc.workspace = true
 tokio.workspace = true
 chrono.workspace = true
 config.workspace = true
@@ -15,6 +16,5 @@ ffmpeg-sys-next.workspace = true
 logging_subscriber.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
-libc.workspace = true
 ashpd.workspace = true
 pipewire.workspace = true
