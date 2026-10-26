@@ -334,7 +334,7 @@ dependencies = [
  "ffmpeg-next",
  "ffmpeg-sys-next",
  "libc",
- "logging_subscriber",
+ "logging-subscriber",
  "pipewire",
  "serde",
  "tokio",
@@ -568,9 +568,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
 
 [[package]]
-name = "logging_subscriber"
-version = "0.0.0"
-source = "git+https://gitlab.com/invra/logging_subscriber#c92d507d842404f87db0f89c1215dc39777419f0"
+name = "logging-subscriber"
+version = "1.0.0"
+source = "git+https://gitlab.com/UltimatePlayer97/logging_subscriber?branch=file-logging#412c9df14d21999461776bd4f58658d6ed14b373"
 dependencies = [
  "tracing",
 ]

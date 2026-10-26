@@ -29,3 +29,10 @@ pub fn write_file(path: &PathBuf, contents: &str) -> io::Result<()> {
 
     fs::write(path, contents)
 }
+
+pub fn log_directory() -> PathBuf {
+    dirs::state_dir()
+        .or_else(dirs::data_local_dir)
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(APP_NAME)
+}

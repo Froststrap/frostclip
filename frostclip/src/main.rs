@@ -17,7 +17,14 @@ use std::path::Path;
 use tracing::{debug, info};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    tracing::subscriber::set_global_default(logging_subscriber::SimpleSubscriber)?;
+    let log_path = config::filesystem::log_directory().join("frostclip.log");
+
+    let subscriber = match logging_subscriber::LoggingSubscriber::new().with_file(&log_path) {
+        Ok(subscriber) => subscriber,
+        Err(_) => logging_subscriber::LoggingSubscriber::new(),
+    };
+
+    tracing::subscriber::set_global_default(subscriber)?;
 
     startup::run().map_err(|e| format!("Startup check failed: {}", e))?;
 
