@@ -314,6 +314,7 @@ impl Encoder for VaapiEncoder {
             } => (data, width, height, stride, format, timestamp),
 
             VideoFrame::LinuxDmaBuf(_) => return Err(()),
+            VideoFrame::MacIoSurface(_) => return Err(()),
         };
 
         if format != VideoFormat::Rgba {
