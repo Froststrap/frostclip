@@ -1,16 +1,20 @@
-use super::{AudioBackend, AudioFormat, AudioFrame, AudioSource};
-use anyhow::{Result, anyhow, bail};
+use super::{AudioBackend, AudioError, AudioFormat, AudioFrame, AudioSource, Result};
 use pipewire as pw;
 use pw::properties::properties;
 use pw::spa;
 use pw::stream::StreamFlags;
 use spa::pod::Pod;
+use std::fmt::Debug;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::JoinHandle;
 use std::time::Instant;
 
 const SAMPLE_RATE: u32 = 48_000;
 const CHANNELS: u32 = 2;
+
+fn pw_err<E: Debug>(err: E) -> AudioError {
+    AudioError::PipeWire(format!("{:?}", err))
+}
 
 struct StreamState {
     info: spa::param::audio::AudioInfoRaw,
@@ -27,7 +31,7 @@ pub struct PlatformAudio {
 impl PlatformAudio {
     pub fn new(source: AudioSource) -> Result<Self> {
         if source == AudioSource::Both {
-            bail!("AudioSource::Both not implemented yet");
+            return Err(AudioError::SourceNotImplemented);
         }
         Ok(Self {
             source,
@@ -40,7 +44,7 @@ impl PlatformAudio {
 impl AudioBackend for PlatformAudio {
     fn start(&mut self) -> Result<Receiver<AudioFrame>> {
         if self.thread.is_some() {
-            bail!("audio capture already running");
+            return Err(AudioError::AlreadyRunning);
         }
 
         let (frame_tx, frame_rx) = mpsc::channel();
@@ -52,14 +56,12 @@ impl AudioBackend for PlatformAudio {
         let handle = std::thread::Builder::new()
             .name("frostclip-audio".into())
             .spawn(move || {
-                if let Err(e) = run(source, frame_tx, quit_rx, ready_tx) {
-                    let _ = err_tx.send(Err(e));
+                if let Err(err) = run(source, frame_tx, quit_rx, ready_tx) {
+                    let _ = err_tx.send(Err(err));
                 }
             })?;
 
-        ready_rx
-            .recv()
-            .map_err(|_| anyhow!("audio thread exited early"))??;
+        ready_rx.recv().map_err(|_| AudioError::ThreadExited)??;
 
         self.quit = Some(quit_tx);
         self.thread = Some(handle);
@@ -85,9 +87,9 @@ fn run(
 ) -> Result<()> {
     pw::init();
 
-    let mainloop = pw::main_loop::MainLoopRc::new(None)?;
-    let context = pw::context::ContextRc::new(&mainloop, None)?;
-    let core = context.connect_rc(None)?;
+    let mainloop = pw::main_loop::MainLoopRc::new(None).map_err(pw_err)?;
+    let context = pw::context::ContextRc::new(&mainloop, None).map_err(pw_err)?;
+    let core = context.connect_rc(None).map_err(pw_err)?;
 
     let _quit = quit_rx.attach(mainloop.loop_(), {
         let mainloop = mainloop.clone();
@@ -103,7 +105,7 @@ fn run(
         props.insert(*pw::keys::STREAM_CAPTURE_SINK, "true");
     }
 
-    let stream = pw::stream::StreamBox::new(&core, "frostclip-audio", props)?;
+    let stream = pw::stream::StreamBox::new(&core, "frostclip-audio", props).map_err(pw_err)?;
 
     let state = StreamState {
         info: spa::param::audio::AudioInfoRaw::new(),
@@ -165,7 +167,8 @@ fn run(
             };
             let _ = state.tx.send(frame);
         })
-        .register()?;
+        .register()
+        .map_err(pw_err)?;
 
     let mut info = spa::param::audio::AudioInfoRaw::new();
     info.set_format(spa::param::audio::AudioFormat::F32LE);
@@ -181,17 +184,20 @@ fn run(
         std::io::Cursor::new(Vec::new()),
         &spa::pod::Value::Object(obj),
     )
-    .map_err(|e| anyhow!("pod serialize: {e:?}"))?
+    .map_err(pw_err)?
     .0
     .into_inner();
-    let mut params = [Pod::from_bytes(&bytes).ok_or_else(|| anyhow!("bad format pod"))?];
+    let mut params =
+        [Pod::from_bytes(&bytes).ok_or_else(|| AudioError::PipeWire("bad format pod".into()))?];
 
-    stream.connect(
-        spa::utils::Direction::Input,
-        None,
-        StreamFlags::AUTOCONNECT | StreamFlags::MAP_BUFFERS | StreamFlags::RT_PROCESS,
-        &mut params,
-    )?;
+    stream
+        .connect(
+            spa::utils::Direction::Input,
+            None,
+            StreamFlags::AUTOCONNECT | StreamFlags::MAP_BUFFERS | StreamFlags::RT_PROCESS,
+            &mut params,
+        )
+        .map_err(pw_err)?;
 
     let _ = ready_tx.send(Ok(()));
     mainloop.run();

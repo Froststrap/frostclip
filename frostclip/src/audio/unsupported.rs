@@ -1,18 +1,17 @@
-use super::{AudioBackend, AudioFrame, AudioSource};
-use anyhow::{Result, bail};
+use super::{AudioBackend, AudioError, AudioFrame, AudioSource, Result};
 use std::sync::mpsc::Receiver;
 
 pub struct PlatformAudio;
 
 impl PlatformAudio {
     pub fn new(_source: AudioSource) -> Result<Self> {
-        bail!("audio capture not supported on this platform")
+        Err(AudioError::Unsupported)
     }
 }
 
 impl AudioBackend for PlatformAudio {
     fn start(&mut self) -> Result<Receiver<AudioFrame>> {
-        bail!("audio capture not supported on this platform")
+        Err(AudioError::Unsupported)
     }
 
     fn stop(&mut self) -> Result<()> {

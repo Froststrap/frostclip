@@ -1,6 +1,6 @@
-use anyhow::Result;
 use std::sync::mpsc::Receiver;
 
+mod error;
 mod frame;
 
 #[cfg(target_os = "linux")]
@@ -8,6 +8,7 @@ mod linux;
 #[cfg(not(target_os = "linux"))]
 mod unsupported;
 
+pub use error::{AudioError, Result};
 pub use frame::{AudioFormat, AudioFrame};
 
 #[cfg(target_os = "linux")]

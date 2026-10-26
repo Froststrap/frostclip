@@ -1,3 +1,4 @@
+pub mod audio;
 mod packet;
 mod platform;
 mod traits;
