@@ -70,24 +70,24 @@ let
 in
 craneLib.devShell {
   meta.license = lib.licenses.unlicense;
+
   buildInputs = [
     pkg-config
     ffmpeg-full
     clang
     mpv
     just
-  ]
-  ++ lib.optionals stdenv.isLinux [
+  ] ++ lib.optionals stdenv.isLinux [
     glib
     pipewire
     llvmPackages.libclang
   ];
 
   LIBCLANG_PATH = "${llvmPackages.libclang.lib}/lib";
-} // lib.optionalAttrs stdenv.isLinux {
-  LD_LIBRARY_PATH =
-    lib.makeLibraryPath runtimeLibs
-    + lib.optionalString stdenv.isLinux ":/run/opengl-driver/lib";
+
+  LD_LIBRARY_PATH = lib.makeLibraryPath runtimeLibs
+    + ":/run/opengl-driver/lib";
+
   LIBVA_DRIVERS_PATH = lib.makeSearchPath "lib/dri" [
     mesa
     intel-media-driver
