@@ -13,7 +13,7 @@ config.workspace = true
 tracing.workspace = true
 ffmpeg-next.workspace = true
 ffmpeg-sys-next.workspace = true
-logging_subscriber.workspace = true
+logging-subscriber.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2.workspace = true

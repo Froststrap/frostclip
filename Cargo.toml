@@ -52,11 +52,9 @@ features = ["std", "clock"]
 version = "0.10"
 features = ["v0_3_33"]
 
-# temporary till file logging patch is merged into upstream
-[workspace.dependencies.logging_subscriber]
-package = "logging-subscriber"
-git = "https://gitlab.com/UltimatePlayer97/logging_subscriber"
-branch = "file-logging"
+[workspace.dependencies.logging-subscriber]
+version = "1.1"
+git = "https://gitlab.com/invra/logging_subscriber"
 
 [workspace.dependencies.serde]
 version = "1.0.229"
