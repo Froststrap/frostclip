@@ -42,9 +42,6 @@ let
     ];
 
   craneLib = (crane.mkLib pkgs).overrideToolchain toolchain;
-in
-craneLib.devShell rec {
-  meta.license = lib.licenses.unlicense;
   runtimeLibs = lib.optionals stdenv.isLinux [
     expat
     fontconfig
@@ -70,6 +67,9 @@ craneLib.devShell rec {
     intel-vaapi-driver
     nvidia-vaapi-driver
   ];
+in
+craneLib.devShell {
+  meta.license = lib.licenses.unlicense;
 
   buildInputs = [
     pkg-config
@@ -77,17 +77,17 @@ craneLib.devShell rec {
     clang
     mpv
     just
-  ]
-  ++ lib.optionals stdenv.isLinux [
+  ] ++ lib.optionals stdenv.isLinux [
     glib
     pipewire
     llvmPackages.libclang
   ];
 
   LIBCLANG_PATH = "${llvmPackages.libclang.lib}/lib";
-  LD_LIBRARY_PATH =
-    lib.makeLibraryPath runtimeLibs
-    + lib.optionalString stdenv.isLinux ":/run/opengl-driver/lib";
+
+  LD_LIBRARY_PATH = lib.makeLibraryPath runtimeLibs
+    + ":/run/opengl-driver/lib";
+
   LIBVA_DRIVERS_PATH = lib.makeSearchPath "lib/dri" [
     mesa
     intel-media-driver
