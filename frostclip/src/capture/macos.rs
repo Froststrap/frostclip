@@ -10,6 +10,7 @@ use objc2_core_media::{CMSampleBuffer, CMTime, CMTimeFlags};
 use objc2_core_video::*;
 use objc2_foundation::{NSError, NSObject, NSObjectProtocol};
 use objc2_screen_capture_kit::*;
+use std::sync::atomic::AtomicI64;
 use std::sync::{Arc, mpsc};
 use std::time::Instant;
 
@@ -20,6 +21,9 @@ struct Ivars {
     started: Instant,
     accepts_native: bool,
     frames: std::sync::atomic::AtomicU64,
+    base_pts_us: std::sync::OnceLock<i64>,
+    min_interval_us: i64,
+    last_emit_us: AtomicI64,
 }
 
 define_class!(
@@ -62,7 +66,23 @@ impl OutputHandler {
 
         let width = CVPixelBufferGetWidth(&pixels) as u32;
         let height = CVPixelBufferGetHeight(&pixels) as u32;
-        let ts = iv.started.elapsed().as_micros() as u64;
+        let ts = {
+            let pts = unsafe { sample.presentation_time_stamp() };
+            if pts.flags.contains(CMTimeFlags::Valid) && pts.timescale != 0 {
+                let us = (pts.value as i128 * 1_000_000 / pts.timescale as i128) as i64;
+                let base = *iv.base_pts_us.get_or_init(|| us);
+                (us - base).max(0) as u64
+            } else {
+                iv.started.elapsed().as_micros() as u64
+            }
+        };
+
+        let last = iv.last_emit_us.load(std::sync::atomic::Ordering::Relaxed);
+        if last != i64::MIN && (ts as i64 - last) < iv.min_interval_us * 9 / 10 {
+            return;
+        }
+        iv.last_emit_us
+            .store(ts as i64, std::sync::atomic::Ordering::Relaxed);
 
         let n = iv.frames.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
         if n == 1 || n % 60 == 0 {
@@ -163,11 +183,16 @@ impl CaptureBackend for Capture {
                 epoch: 0,
             });
 
+            const TARGET_FPS: i64 = 60;
+
             let handler = OutputHandler::new(Ivars {
                 callback: callback.into(),
                 started: Instant::now(),
                 accepts_native: accepts_dmabuf,
                 frames: Default::default(),
+                base_pts_us: Default::default(),
+                min_interval_us: 1_000_000 / TARGET_FPS,
+                last_emit_us: AtomicI64::new(i64::MIN),
             });
 
             let stream = SCStream::initWithFilter_configuration_delegate(
