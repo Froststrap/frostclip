@@ -42,9 +42,6 @@ let
     ];
 
   craneLib = (crane.mkLib pkgs).overrideToolchain toolchain;
-in
-craneLib.devShell rec {
-  meta.license = lib.licenses.unlicense;
   runtimeLibs = lib.optionals stdenv.isLinux [
     expat
     fontconfig
@@ -70,7 +67,9 @@ craneLib.devShell rec {
     intel-vaapi-driver
     nvidia-vaapi-driver
   ];
-
+in
+craneLib.devShell {
+  meta.license = lib.licenses.unlicense;
   buildInputs = [
     pkg-config
     ffmpeg-full
@@ -85,6 +84,7 @@ craneLib.devShell rec {
   ];
 
   LIBCLANG_PATH = "${llvmPackages.libclang.lib}/lib";
+} // lib.optionalAttrs stdenv.isLinux {
   LD_LIBRARY_PATH =
     lib.makeLibraryPath runtimeLibs
     + lib.optionalString stdenv.isLinux ":/run/opengl-driver/lib";

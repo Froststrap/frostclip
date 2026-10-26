@@ -6,15 +6,17 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
-ashpd.workspace = true
-chrono.workspace = true
 dirs.workspace = true
+toml.workspace = true
+tokio.workspace = true
+serde.workspace = true
+chrono.workspace = true
+tracing.workspace = true
 ffmpeg-next.workspace = true
 ffmpeg-sys-next.workspace = true
 logging_subscriber.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
 libc.workspace = true
+ashpd.workspace = true
 pipewire.workspace = true
-serde.workspace = true
-tokio.workspace = true
-toml.workspace = true
-tracing.workspace = true
