@@ -23,7 +23,6 @@
   clang,
   glib,
   just,
-  create-dmg,
   ffmpeg-full,
   libva,
   mesa,
@@ -78,9 +77,6 @@ craneLib.devShell rec {
     clang
     mpv
     just
-  ]
-  ++ lib.optionals stdenv.isDarwin [
-    create-dmg
   ]
   ++ lib.optionals stdenv.isLinux [
     glib
