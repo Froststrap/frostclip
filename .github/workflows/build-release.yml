@@ -47,7 +47,7 @@ jobs:
                 libx264-dev
               ;;
             macOS)
-              brew install ffmpeg pkg-config
+              brew install ffmpeg@8 pkg-config
               ;;
           esac
 
