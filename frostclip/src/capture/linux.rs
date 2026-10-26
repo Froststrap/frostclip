@@ -25,14 +25,14 @@ struct StreamState {
     accepts_dmabuf: bool,
 }
 
-pub struct LinuxCapture {
+pub struct Capture {
     portal: Option<PortalStream>,
     quit_sender: Option<pw::channel::Sender<()>>,
     thread_handle: Option<std::thread::JoinHandle<()>>,
     info: CaptureInfo,
 }
 
-impl LinuxCapture {
+impl Capture {
     pub async fn new(
         restore_token: Option<&str>,
         state: &mut config::AppState,
@@ -616,7 +616,7 @@ impl LinuxCapture {
     }
 }
 
-impl CaptureBackend for LinuxCapture {
+impl CaptureBackend for Capture {
     fn start(
         &mut self,
         callback: Box<dyn Fn(VideoFrame) + Send + Sync>,

@@ -1,6 +1,12 @@
 use crate::frame::VideoFrame;
 
-pub mod linux;
+#[cfg(target_os = "linux")]
+#[path = "linux.rs"]
+mod platform;
+
+#[cfg(target_os = "macos")]
+#[path = "macos.rs"]
+mod platform;
 
 #[derive(Debug, Clone)]
 pub struct CaptureInfo {
@@ -29,7 +35,7 @@ impl Capture {
         let token = state.session_token().map(str::to_owned);
 
         Ok(Self {
-            backend: Box::new(linux::LinuxCapture::new(token.as_deref(), state).await?),
+            backend: Box::new(platform::Capture::new(token.as_deref(), state).await?),
         })
     }
 
