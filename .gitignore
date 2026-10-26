@@ -1,9 +1,3 @@
-frostclip.exe
-frostclip.syso
-
-go.sum
-
-settings.json
-
-
-logs/
+clips/
+target/
+build/

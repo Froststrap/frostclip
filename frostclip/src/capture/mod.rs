@@ -1,0 +1,57 @@
+use crate::frame::VideoFrame;
+
+#[cfg(target_os = "linux")]
+#[path = "linux/mod.rs"]
+mod platform;
+
+#[cfg(target_os = "macos")]
+#[path = "macos.rs"]
+mod platform;
+
+#[derive(Debug, Clone)]
+pub struct CaptureInfo {
+    pub width: u32,
+    pub height: u32,
+}
+
+pub trait CaptureBackend {
+    fn start(
+        &mut self,
+        callback: Box<dyn Fn(VideoFrame) + Send + Sync>,
+        accepts_dmabuf: bool,
+    ) -> Result<(), ()>;
+
+    fn stop(&mut self) -> Result<(), ()>;
+
+    fn info(&self) -> CaptureInfo;
+}
+
+pub struct Capture {
+    backend: Box<dyn CaptureBackend>,
+}
+
+impl Capture {
+    pub async fn new(state: &mut config::AppState) -> Result<Self, ()> {
+        let token = state.session_token().map(str::to_owned);
+
+        Ok(Self {
+            backend: Box::new(platform::Capture::new(token.as_deref(), state).await?),
+        })
+    }
+
+    pub fn start(
+        &mut self,
+        callback: Box<dyn Fn(VideoFrame) + Send + Sync>,
+        accepts_dmabuf: bool,
+    ) -> Result<(), ()> {
+        self.backend.start(callback, accepts_dmabuf)
+    }
+
+    pub fn stop(&mut self) -> Result<(), ()> {
+        self.backend.stop()
+    }
+
+    pub fn info(&self) -> CaptureInfo {
+        self.backend.info()
+    }
+}

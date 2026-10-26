@@ -1,0 +1,62 @@
+name: Dev Build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    name: build (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux
+            os: ubuntu-26.04
+          - name: macos
+            os: macos-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          case "$RUNNER_OS" in
+            Linux)
+              sudo apt-get update
+              sudo apt-get install -y \
+                pkg-config clang libclang-dev \
+                libpipewire-0.3-dev libspa-0.2-dev libva-dev \
+                libavcodec-dev libavformat-dev libavutil-dev libavfilter-dev \
+                libavdevice-dev libswscale-dev libswresample-dev \
+                libx264-dev
+              ;;
+            macOS)
+              brew install ffmpeg@8 pkg-config
+              ;;
+          esac
+
+      - name: Show ffmpeg version
+        run: pkg-config --modversion libavcodec
+
+      - name: Format check
+        run: cargo fmt --check
+
+      - name: Build
+        run: cargo b
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: frostclip-dev-${{ matrix.name }}
+          path: target/debug/frostclip
+          retention-days: 7
