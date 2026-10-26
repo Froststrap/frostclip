@@ -186,6 +186,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "config"
+version = "0.0.1"
+dependencies = [
+ "dirs",
+ "serde",
+ "toml",
+ "tracing",
+]
+
+[[package]]
 name = "cookie-factory"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -330,15 +340,13 @@ version = "0.0.1"
 dependencies = [
  "ashpd",
  "chrono",
- "dirs",
+ "config",
  "ffmpeg-next",
  "ffmpeg-sys-next",
  "libc",
  "logging-subscriber",
  "pipewire",
- "serde",
  "tokio",
- "toml",
  "tracing",
 ]
 

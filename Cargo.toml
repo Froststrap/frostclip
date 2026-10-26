@@ -1,6 +1,9 @@
 [workspace]
 resolver = "3"
-members = ["frostclip"]
+members = [
+  "config",
+  "frostclip"
+]
 default-members = ["frostclip"]
 
 [workspace.package]
@@ -19,6 +22,9 @@ ffmpeg-sys-next = "8.1"
 libc = "0.2"
 toml = "1.1.4"
 tracing = "0.1.44"
+
+[workspace.dependencies.config]
+path = "config"
 
 [workspace.dependencies.ashpd]
 version = "0.13.13"

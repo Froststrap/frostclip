@@ -72,17 +72,13 @@ impl Config {
     pub fn save(&self) -> Result<(), Box<dyn std::error::Error>> {
         let contents = toml::to_string_pretty(self)?;
 
-        crate::config::filesystem::write_file(
-            &crate::config::filesystem::user_config_file(),
-            &contents,
-        )?;
+        crate::filesystem::write_file(&crate::filesystem::user_config_file(), &contents)?;
 
         Ok(())
     }
 
     pub fn load() -> Result<Self, Box<dyn std::error::Error>> {
-        let contents =
-            crate::config::filesystem::read_file(&crate::config::filesystem::user_config_file())?;
+        let contents = crate::filesystem::read_file(&crate::filesystem::user_config_file())?;
 
         Ok(toml::from_str(&contents)?)
     }

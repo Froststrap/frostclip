@@ -25,7 +25,7 @@ pub struct Capture {
 }
 
 impl Capture {
-    pub async fn new(state: &mut crate::config::AppState) -> Result<Self, ()> {
+    pub async fn new(state: &mut config::AppState) -> Result<Self, ()> {
         let token = state.session_token().map(str::to_owned);
 
         Ok(Self {

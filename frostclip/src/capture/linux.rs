@@ -35,7 +35,7 @@ pub struct LinuxCapture {
 impl LinuxCapture {
     pub async fn new(
         restore_token: Option<&str>,
-        state: &mut crate::config::AppState,
+        state: &mut config::AppState,
     ) -> Result<Self, ()> {
         let portal = crate::portal::screencast::create(restore_token)
             .await
