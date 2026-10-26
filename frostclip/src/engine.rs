@@ -1,8 +1,8 @@
 use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use tracing::{debug, error, info};
 use config::{AppState, Config};
+use tracing::{debug, error, info};
 
 use crate::buffer::ReplayBuffer;
 use crate::capture::Capture;

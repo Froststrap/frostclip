@@ -28,6 +28,31 @@ pub struct EncoderStatus {
     pub available: bool,
 }
 
+#[cfg(target_os = "macos")]
+fn try_videotoolbox(config: EncoderConfig) -> Option<Box<dyn Encoder>> {
+    use super::platform::macos::VideoToolboxEncoder;
+
+    info!("Using VideoToolbox encoder");
+
+    match VideoToolboxEncoder::new(
+        config.output_width,
+        config.output_height,
+        config.framerate,
+        config.bitrate_kbps,
+    ) {
+        Ok(encoder) => Some(Box::new(encoder)),
+        Err(()) => {
+            warn!("VideoToolbox init failed, falling back");
+            None
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn try_videotoolbox(_config: EncoderConfig) -> Option<Box<dyn Encoder>> {
+    None
+}
+
 fn try_nvenc(config: EncoderConfig) -> Option<Box<dyn Encoder>> {
     if !NvencEncoder::probe() {
         return None;
@@ -105,6 +130,11 @@ pub fn encoder_statuses() -> Vec<EncoderStatus> {
                 && ffmpeg::encoder::find_by_name("h264_vaapi").is_some(),
         },
         EncoderStatus {
+            name: "videotoolbox",
+            supported: cfg!(target_os = "macos"),
+            available: cfg!(target_os = "macos"),
+        },
+        EncoderStatus {
             name: "libx264",
             supported: true,
             available: ffmpeg::encoder::find_by_name("libx264").is_some(),
@@ -125,6 +155,11 @@ pub fn create_encoder(config: EncoderConfig) -> Result<Box<dyn Encoder>, ()> {
                 warn!("FROSTCLIP_ENCODER=nvenc requested but unavailable");
             });
         }
+        Some("videotoolbox") => {
+            return try_videotoolbox(config).ok_or_else(|| {
+                warn!("FROSTCLIP_ENCODER=videotoolbox requested but unavailable");
+            });
+        }
         Some(other) => warn!("FROSTCLIP_ENCODER={} unknown, using auto", other),
         None => {}
     }
@@ -134,6 +169,10 @@ pub fn create_encoder(config: EncoderConfig) -> Result<Box<dyn Encoder>, ()> {
     }
 
     if let Some(encoder) = try_vaapi(config) {
+        return Ok(encoder);
+    }
+
+    if let Some(encoder) = try_videotoolbox(config) {
         return Ok(encoder);
     }
 
