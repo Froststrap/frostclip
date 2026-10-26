@@ -15,6 +15,9 @@ authors = [
   "Invra <identificationsucks@gmail.com>",
 ]
 
+[profile.dev]
+opt-level = 1
+
 [workspace.dependencies]
 dirs = "6.0"
 ffmpeg-next = "8.1"
