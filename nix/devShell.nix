@@ -68,7 +68,7 @@ let
     nvidia-vaapi-driver
   ];
 in
-craneLib.devShell {
+craneLib.devShell ({
   meta.license = lib.licenses.unlicense;
 
   buildInputs = [
@@ -82,7 +82,8 @@ craneLib.devShell {
     pipewire
     llvmPackages.libclang
   ];
-
+}
+// lib.optionalAttrs stdenv.isLinux {
   LIBCLANG_PATH = "${llvmPackages.libclang.lib}/lib";
 
   LD_LIBRARY_PATH = lib.makeLibraryPath runtimeLibs
@@ -94,4 +95,4 @@ craneLib.devShell {
     intel-vaapi-driver
     nvidia-vaapi-driver
   ];
-}
+})

@@ -5,7 +5,7 @@ on:
   pull_request:
 
 jobs:
-  dev:
+  linux:
     runs-on: ubuntu-26.04
 
     steps:
@@ -14,39 +14,58 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install ffmpeg 
+        uses: AnimMouse/setup-ffmpeg@v1
+
       - name: Cache Rust
         uses: Swatinem/rust-cache@v2
-
-      - name: Install Just
-        uses: extractions/setup-just@v4
 
       - name: Install Linux dependencies
         run: |
           sudo apt update
           sudo apt install -y \
             pkg-config \
-            libavcodec-dev \
-            libavformat-dev \
-            libavutil-dev \
-            libavfilter-dev \
-            libswscale-dev \
-            libva-dev \
-            libva-drm2 \
             libpipewire-0.3-dev \
             libspa-0.2-dev \
-            libavdevice-dev \
-            libswresample-dev \
+            libva-drm2 \
             libclang-dev
 
       - name: Format check
         run: cargo fmt --check
 
       - name: Build
-        run: just linux-dev
+        run: cargo b
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v7
         with:
           name: frostclip-dev-linux
-          path: build/frostclip-linux-dev
+          path: target/debug/frostclip
+          retention-days: 7
+  macos:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install ffmpeg 
+        uses: AnimMouse/setup-ffmpeg@v1
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+
+      - name: Format check
+        run: cargo fmt --check
+
+      - name: Build
+        run: cargo b
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: frostclip-dev-macos
+          path: target/debug/frostclip
           retention-days: 7

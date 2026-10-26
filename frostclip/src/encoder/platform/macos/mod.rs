@@ -1,1 +1,3 @@
-compile_error!("macOS encoder support is not implemented");
+mod videotoolbox;
+
+pub(crate) use videotoolbox::VideoToolboxEncoder;

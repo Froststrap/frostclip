@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
-use crate::config::filesystem;
+use crate::filesystem;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct AppState {

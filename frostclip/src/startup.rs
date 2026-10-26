@@ -68,8 +68,8 @@ fn log_encoders() {
 }
 
 fn log_paths() {
-    let config_path = crate::config::filesystem::user_config_file();
-    let state_path = crate::config::filesystem::state_file();
+    let config_path = config::filesystem::user_config_file();
+    let state_path = config::filesystem::state_file();
 
     info!("Config: {}", config_path.display());
     info!("State:  {}", state_path.display());

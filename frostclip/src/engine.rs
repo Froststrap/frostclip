@@ -1,11 +1,11 @@
 use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard};
 
+use config::{AppState, Config};
 use tracing::{debug, error, info};
 
 use crate::buffer::ReplayBuffer;
 use crate::capture::Capture;
-use crate::config::{AppState, Config};
 use crate::encoder::{Encoder, EncoderConfig, create_encoder};
 use crate::frame::VideoFrame;
 use crate::muxer::MuxerFactory;

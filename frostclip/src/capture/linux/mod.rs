@@ -1,6 +1,7 @@
+mod portal;
 use crate::capture::{CaptureBackend, CaptureInfo};
 use crate::frame::{DmaBufFrame, VideoFormat, VideoFrame};
-use crate::portal::screencast::PortalStream;
+use portal::screencast::PortalStream;
 
 use pipewire as pw;
 use pw::spa::param::format::{FormatProperties, MediaSubtype, MediaType};
@@ -25,19 +26,19 @@ struct StreamState {
     accepts_dmabuf: bool,
 }
 
-pub struct LinuxCapture {
+pub struct Capture {
     portal: Option<PortalStream>,
     quit_sender: Option<pw::channel::Sender<()>>,
     thread_handle: Option<std::thread::JoinHandle<()>>,
     info: CaptureInfo,
 }
 
-impl LinuxCapture {
+impl Capture {
     pub async fn new(
         restore_token: Option<&str>,
-        state: &mut crate::config::AppState,
+        state: &mut config::AppState,
     ) -> Result<Self, ()> {
-        let portal = crate::portal::screencast::create(restore_token)
+        let portal = portal::screencast::create(restore_token)
             .await
             .map_err(|err| {
                 error!("PORTAL creation failed: {}", err);
@@ -616,7 +617,7 @@ impl LinuxCapture {
     }
 }
 
-impl CaptureBackend for LinuxCapture {
+impl CaptureBackend for Capture {
     fn start(
         &mut self,
         callback: Box<dyn Fn(VideoFrame) + Send + Sync>,
