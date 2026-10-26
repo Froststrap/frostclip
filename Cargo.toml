@@ -51,4 +51,4 @@ features = ["derive"]
 
 [workspace.dependencies.tokio]
 version = "1.53.1"
-features = ["rt", "time"]
+features = ["rt", "time", "macros", "rt-multi-thread"]

@@ -14,7 +14,8 @@ use std::path::Path;
 
 use tracing::{debug, info};
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let log_path = config::filesystem::log_directory().join("frostclip.log");
 
     let subscriber = match logging_subscriber::LoggingSubscriber::new().with_file(&log_path) {
@@ -26,12 +27,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     startup::run().map_err(|e| format!("Startup check failed: {}", e))?;
 
-    let runtime = tokio::runtime::Runtime::new()?;
-
-    runtime.block_on(async { run().await })
-}
-
-async fn run() -> Result<(), Box<dyn std::error::Error>> {
     info!("Starting capture pipeline");
 
     if Path::new("./clips").exists() {
