@@ -48,7 +48,6 @@ pub struct CaptureEngine {
     encoder: Arc<Mutex<Box<dyn Encoder>>>,
     buffer: Arc<Mutex<ReplayBuffer>>,
     config: Config,
-    state: AppState,
     running: Arc<Mutex<bool>>,
 }
 
@@ -103,7 +102,6 @@ impl CaptureEngine {
             encoder: Arc::new(Mutex::new(encoder)),
             buffer: Arc::new(Mutex::new(buffer)),
             config,
-            state,
             running: Arc::new(Mutex::new(false)),
         })
     }
@@ -131,7 +129,7 @@ impl CaptureEngine {
                         return;
                     }
 
-                    let elapsed = {
+                    let _elapsed = {
                         let mut count = lock(&fps_count);
                         *count += 1;
 

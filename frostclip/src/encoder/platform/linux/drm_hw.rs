@@ -59,10 +59,6 @@ impl DrmHardware {
         })
     }
 
-    pub fn device_ctx(&self) -> *mut AVBufferRef {
-        self.device_ctx
-    }
-
     pub fn frames_ctx(&self) -> *mut AVBufferRef {
         self.frames_ctx
     }

@@ -57,9 +57,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     engine.start().map_err(|_| "Failed to start engine")?;
 
-    info!("Capturing for {} seconds...", clip_seconds + 5);
+    info!("Capturing for {} seconds...", clip_seconds + 3);
 
-    tokio::time::sleep(std::time::Duration::from_secs(clip_seconds as u64 + 5)).await;
+    tokio::time::sleep(std::time::Duration::from_secs(clip_seconds as u64 + 3)).await;
 
     info!("Saving clip {clip_seconds} seconds...");
 

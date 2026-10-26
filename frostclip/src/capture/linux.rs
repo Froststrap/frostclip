@@ -27,7 +27,6 @@ struct StreamState {
 
 pub struct LinuxCapture {
     portal: Option<PortalStream>,
-    restore_token: Option<String>,
     quit_sender: Option<pw::channel::Sender<()>>,
     thread_handle: Option<std::thread::JoinHandle<()>>,
     info: CaptureInfo,
@@ -72,7 +71,6 @@ impl LinuxCapture {
 
         Ok(Self {
             portal: Some(portal),
-            restore_token,
             quit_sender: None,
             thread_handle: None,
             info,
@@ -457,7 +455,6 @@ impl LinuxCapture {
                             }
                             Err(err) => error!("PIPEWIRE: dma-buf CPU read failed: {}", err),
                         }
-                        return;
                         return;
                     }
 

@@ -26,7 +26,7 @@ impl VaapiGraph {
         let buffer = filter::find("buffer").ok_or("buffer filter missing")?;
         let buffersink = filter::find("buffersink").ok_or("buffersink filter missing")?;
 
-        let args = format!(
+        let _args = format!(
             "video_size={}x{}:pix_fmt=drm_prime:time_base=1/1000000:pixel_aspect=1/1:frame_rate={}/1",
             input_width, input_height, framerate
         );
