@@ -23,9 +23,6 @@ jobs:
       - name: Cache Rust
         uses: Swatinem/rust-cache@v2
 
-      - name: Install Just
-        uses: extractions/setup-just@v4
-
       - name: Install Linux dependencies
         run: |
           sudo apt update
@@ -46,13 +43,13 @@ jobs:
             upx
 
       - name: Build
-        run: just linux-release
+        run: cargo b -r
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v7
         with:
           name: frostclip-linux
-          path: build/frostclip-linux
+          path: target/release/frostclip
           retention-days: 30
 
   release:
