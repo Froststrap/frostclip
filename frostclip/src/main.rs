@@ -1,11 +1,9 @@
 pub mod buffer;
 pub mod capture;
-pub mod config;
 pub mod encoder;
 pub mod engine;
 pub mod frame;
 pub mod muxer;
-pub mod portal;
 pub mod startup;
 
 use config::{AppState, Config};

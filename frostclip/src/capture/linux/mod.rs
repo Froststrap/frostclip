@@ -1,6 +1,7 @@
+mod portal;
 use crate::capture::{CaptureBackend, CaptureInfo};
 use crate::frame::{DmaBufFrame, VideoFormat, VideoFrame};
-use crate::portal::screencast::PortalStream;
+use portal::screencast::PortalStream;
 
 use pipewire as pw;
 use pw::spa::param::format::{FormatProperties, MediaSubtype, MediaType};
@@ -37,7 +38,7 @@ impl Capture {
         restore_token: Option<&str>,
         state: &mut config::AppState,
     ) -> Result<Self, ()> {
-        let portal = crate::portal::screencast::create(restore_token)
+        let portal = portal::screencast::create(restore_token)
             .await
             .map_err(|err| {
                 error!("PORTAL creation failed: {}", err);
