@@ -138,6 +138,7 @@ impl SoftwareEncoder {
             self.last_packet_pts = Some(pts);
 
             packets.push(EncodedPacket {
+                kind: crate::encoder::packet::PacketKind::Video,
                 data: packet.data().unwrap_or(&[]).to_vec(),
                 pts,
                 dts,
