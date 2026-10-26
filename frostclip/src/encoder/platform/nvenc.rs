@@ -169,6 +169,7 @@ impl Encoder for NvencEncoder {
                 error!("NVENC: VideoFrame::LinuxDmaBuf is not supported in CPU frame mode");
                 return Err(());
             }
+            VideoFrame::MacIoSurface(_) => unreachable!(),
         };
 
         if format != VideoFormat::Rgba {

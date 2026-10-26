@@ -15,6 +15,18 @@ ffmpeg-next.workspace = true
 ffmpeg-sys-next.workspace = true
 logging_subscriber.workspace = true
 
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2.workspace = true
+objc2-foundation.workspace = true
+objc2-screen-capture-kit.workspace = true
+objc2-core-media.workspace = true
+objc2-video-toolbox.workspace = true
+objc2-core-video.workspace = true
+objc2-core-foundation.workspace = true
+objc2-core-graphics.workspace = true
+block2.workspace = true
+dispatch2.workspace = true
+
 [target.'cfg(target_os = "linux")'.dependencies]
 ashpd.workspace = true
 pipewire.workspace = true
