@@ -55,6 +55,10 @@ jobs:
     runs-on: macos-latest
 
     steps:
+      - name: Install macOS dependencies
+        run: |
+          brew install ffmpeg-full
+      
       - uses: actions/checkout@v7
       - name: Build
         run: cargo b -r

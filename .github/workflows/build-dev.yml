@@ -52,6 +52,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
+      - name: Install macOS dependencies
+        run: |
+          brew install ffmpeg-full
       - name: Format check
         run: cargo fmt --check
       - name: Build
