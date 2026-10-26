@@ -1,4 +1,5 @@
 mod dmabuf;
+#[cfg(target_os = "macos")]
 pub mod iosurface;
 
 pub use dmabuf::DmaBufFrame;
