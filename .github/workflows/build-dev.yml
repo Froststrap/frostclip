@@ -5,8 +5,18 @@ on:
   pull_request:
 
 jobs:
-  linux:
-    runs-on: ubuntu-26.04
+  build:
+    name: build (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux
+            os: ubuntu-26.04
+          - name: macos
+            os: macos-latest
 
     steps:
       - uses: actions/checkout@v7
@@ -14,21 +24,29 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install ffmpeg 
-        uses: AnimMouse/setup-ffmpeg@v1
-
       - name: Cache Rust
         uses: Swatinem/rust-cache@v2
 
-      - name: Install Linux dependencies
+      - name: Install dependencies
+        shell: bash
         run: |
-          sudo apt update
-          sudo apt install -y \
-            pkg-config \
-            libpipewire-0.3-dev \
-            libspa-0.2-dev \
-            libva-drm2 \
-            libclang-dev
+          case "$RUNNER_OS" in
+            Linux)
+              sudo apt-get update
+              sudo apt-get install -y \
+                pkg-config clang libclang-dev \
+                libpipewire-0.3-dev libspa-0.2-dev libva-dev \
+                libavcodec-dev libavformat-dev libavutil-dev libavfilter-dev \
+                libavdevice-dev libswscale-dev libswresample-dev \
+                libx264-dev
+              ;;
+            macOS)
+              brew install ffmpeg@8 pkg-config
+              ;;
+          esac
+
+      - name: Show ffmpeg version
+        run: pkg-config --modversion libavcodec
 
       - name: Format check
         run: cargo fmt --check
@@ -39,33 +57,6 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v7
         with:
-          name: frostclip-dev-linux
-          path: target/debug/frostclip
-          retention-days: 7
-  macos:
-    runs-on: macos-latest
-
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install ffmpeg 
-        uses: AnimMouse/setup-ffmpeg@v1
-
-      - name: Cache Rust
-        uses: Swatinem/rust-cache@v2
-
-      - name: Format check
-        run: cargo fmt --check
-
-      - name: Build
-        run: cargo b
-
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: frostclip-dev-macos
+          name: frostclip-dev-${{ matrix.name }}
           path: target/debug/frostclip
           retention-days: 7

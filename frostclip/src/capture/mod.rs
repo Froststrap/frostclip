@@ -1,7 +1,7 @@
 use crate::frame::VideoFrame;
 
 #[cfg(target_os = "linux")]
-#[path = "linux.rs"]
+#[path = "linux/mod.rs"]
 mod platform;
 
 #[cfg(target_os = "macos")]
