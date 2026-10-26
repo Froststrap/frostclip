@@ -1,5 +1,5 @@
 use crate::capture::{CaptureBackend, CaptureInfo};
-use crate::frame::{IoSurfaceFrame, SendPixelBuffer, VideoFrame};
+use crate::frame::{SendPixelBuffer, VideoFrame};
 
 use block2::RcBlock;
 use dispatch2::{DispatchQueue, DispatchQueueAttr};
@@ -92,7 +92,7 @@ impl OutputHandler {
             );
         }
 
-        let frame = IoSurfaceFrame {
+        let frame = crate::frame::iosurface::IoSurfaceFrame {
             buffer: SendPixelBuffer(pixels),
             width,
             height,

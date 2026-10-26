@@ -1,10 +1,9 @@
 mod dmabuf;
-#[cfg(target_os = "macos")]
-mod iosurface;
+pub mod iosurface;
 
 pub use dmabuf::DmaBufFrame;
 #[cfg(target_os = "macos")]
-pub use iosurface::{IoSurfaceFrame, SendPixelBuffer};
+pub use iosurface::SendPixelBuffer;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VideoFormat {
@@ -18,7 +17,7 @@ pub enum VideoFormat {
 #[derive(Debug)]
 pub enum VideoFrame {
     LinuxDmaBuf(DmaBufFrame),
-    MacIoSurface(IoSurfaceFrame),
+    MacIoSurface(iosurface::IoSurfaceFrame),
 
     Cpu {
         data: Vec<u8>,
