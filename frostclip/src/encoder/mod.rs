@@ -6,8 +6,9 @@ mod video_info;
 
 pub mod factory;
 
+pub use audio::AudioInfo;
 pub use factory::{EncoderConfig, EncoderStatus, create_encoder, encoder_statuses};
-pub use packet::EncodedPacket;
+pub use packet::{EncodedPacket, PacketKind};
 pub use traits::Encoder;
 pub use video_info::VideoInfo;
 

@@ -8,6 +8,13 @@ use crate::{
 
 const AAC_FRAME_SIZE: usize = 1024;
 
+#[derive(Clone)]
+pub struct AudioInfo {
+    pub sample_rate: u32,
+    pub channels: u16,
+    pub extradata: Vec<u8>,
+}
+
 pub struct AudioEncoder {
     encoder: ffmpeg::codec::encoder::audio::Encoder,
     resampler: ffmpeg::software::resampling::Context,
@@ -90,6 +97,14 @@ impl AudioEncoder {
 
     pub fn channels(&self) -> u16 {
         self.channels
+    }
+
+    pub fn info(&self) -> AudioInfo {
+        AudioInfo {
+            sample_rate: self.sample_rate,
+            channels: self.channels,
+            extradata: self.extradata.clone(),
+        }
     }
 
     pub fn submit(&mut self, input: AudioFrame) -> Result<Vec<EncodedPacket>, ()> {

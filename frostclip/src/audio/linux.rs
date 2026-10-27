@@ -7,7 +7,6 @@ use spa::pod::Pod;
 use std::fmt::Debug;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::JoinHandle;
-use std::time::Instant;
 
 const SAMPLE_RATE: u32 = 48_000;
 const CHANNELS: u32 = 2;
@@ -19,7 +18,6 @@ fn pw_err<E: Debug>(err: E) -> AudioError {
 struct StreamState {
     info: spa::param::audio::AudioInfoRaw,
     tx: Sender<AudioFrame>,
-    start: Instant,
 }
 
 pub struct PlatformAudio {
@@ -110,7 +108,6 @@ fn run(
     let state = StreamState {
         info: spa::param::audio::AudioInfoRaw::new(),
         tx: frame_tx,
-        start: Instant::now(),
     };
 
     let _listener = stream
@@ -159,7 +156,7 @@ fn run(
                 .collect();
             let frame = AudioFrame {
                 samples,
-                pts_us: state.start.elapsed().as_micros() as i64,
+                pts_us: crate::clock::now_us(),
                 format: AudioFormat {
                     sample_rate: rate,
                     channels: channels as u16,

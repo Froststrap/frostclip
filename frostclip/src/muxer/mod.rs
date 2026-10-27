@@ -1,4 +1,4 @@
-use crate::encoder::{EncodedPacket, VideoInfo};
+use crate::encoder::{AudioInfo, EncodedPacket, VideoInfo};
 
 pub mod mp4;
 
@@ -11,7 +11,12 @@ pub trait Muxer {
 pub trait MuxerFactory {
     fn extension(&self) -> &'static str;
 
-    fn create(&self, path: &str, info: &VideoInfo) -> Result<Box<dyn Muxer>, ()>;
+    fn create(
+        &self,
+        path: &str,
+        video: &VideoInfo,
+        audio: Option<&AudioInfo>,
+    ) -> Result<Box<dyn Muxer>, ()>;
 }
 
 pub struct Mp4MuxerFactory;
@@ -21,7 +26,12 @@ impl MuxerFactory for Mp4MuxerFactory {
         "mp4"
     }
 
-    fn create(&self, path: &str, info: &VideoInfo) -> Result<Box<dyn Muxer>, ()> {
-        Ok(Box::new(mp4::Mp4Muxer::create(path, info)?))
+    fn create(
+        &self,
+        path: &str,
+        video: &VideoInfo,
+        audio: Option<&AudioInfo>,
+    ) -> Result<Box<dyn Muxer>, ()> {
+        Ok(Box::new(mp4::Mp4Muxer::create(path, video, audio)?))
     }
 }
