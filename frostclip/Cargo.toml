@@ -30,3 +30,5 @@ dispatch2.workspace = true
 [target.'cfg(target_os = "linux")'.dependencies]
 ashpd.workspace = true
 pipewire.workspace = true
+wayland-client.workspace = true
+wayland-protocols.workspace = true

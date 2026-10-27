@@ -7,7 +7,6 @@ use tracing::{debug, info, warn};
 
 #[derive(Debug)]
 pub struct PortalStream {
-    pub screencast: Screencast,
     pub session: ashpd::desktop::Session<Screencast>,
     pub streams: Vec<ashpd::desktop::screencast::Stream>,
     pub pipewire_fd: OwnedFd,
@@ -67,7 +66,6 @@ pub async fn create(saved_restore_token: Option<&str>) -> ashpd::Result<PortalSt
     info!("PORTAL: session established successfully");
 
     Ok(PortalStream {
-        screencast,
         session,
         streams,
         pipewire_fd,

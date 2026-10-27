@@ -205,6 +205,7 @@ impl Capture {
 
     fn start_capture(&mut self, callback: FrameCallback, accepts_dmabuf: bool) -> Result<(), ()> {
         let portal = self.portal.take().ok_or(())?;
+        let runtime = tokio::runtime::Handle::try_current().ok();
         let buffer_bytes = Self::build_buffer_params(accepts_dmabuf)?;
         let modifier_bytes = Self::build_format_params(true)?;
         let plain_bytes = Self::build_format_params(false)?;
@@ -594,7 +595,13 @@ impl Capture {
 
             info!("PIPEWIRE: loop stopped cleanly");
 
-            drop(portal);
+            match runtime {
+                Some(runtime) => match runtime.block_on(portal.session.close()) {
+                    Ok(()) => info!("PORTAL: session closed"),
+                    Err(err) => warn!("PORTAL: session close failed: {}", err),
+                },
+                None => warn!("PORTAL: no tokio runtime, session left open"),
+            }
         });
 
         self.thread_handle = Some(handle);

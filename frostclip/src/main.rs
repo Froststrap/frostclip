@@ -6,6 +6,7 @@ pub mod capture;
 pub mod encoder;
 pub mod engine;
 pub mod frame;
+pub mod monitor;
 pub mod muxer;
 pub mod startup;
 
@@ -15,7 +16,7 @@ use engine::CaptureEngine;
 use std::fs;
 use std::path::Path;
 
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -50,7 +51,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let clip_seconds = config.default_clip_seconds;
 
-    let state = AppState::load().unwrap_or_default();
+    let mut state = AppState::load().unwrap_or_default();
+
+    state.update_monitors(monitor::list_monitors());
+
+    for monitor in &state.monitors {
+        info!(
+            "MONITOR: {} {}x{}@{:.2}Hz at {},{} scale={}",
+            monitor.name,
+            monitor.width,
+            monitor.height,
+            monitor.refresh_hz,
+            monitor.x,
+            monitor.y,
+            monitor.scale
+        );
+    }
+
+    if let Err(err) = state.save() {
+        warn!("STATE: failed to save monitors: {}", err);
+    }
 
     let mut engine = CaptureEngine::new(config, state)
         .await

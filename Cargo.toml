@@ -22,6 +22,7 @@ opt-level = 1
 dirs = "6.0"
 ffmpeg-next = "8.1"
 ffmpeg-sys-next = "8.1"
+wayland-client = "0.31"
 libc = "0.2"
 toml = "1.1.4"
 tracing = "0.1.44"
@@ -63,3 +64,7 @@ features = ["derive"]
 [workspace.dependencies.tokio]
 version = "1.53.1"
 features = ["rt", "time", "macros", "rt-multi-thread"]
+
+[workspace.dependencies.wayland-protocols]
+version = "0.32"
+features = ["client", "unstable"]

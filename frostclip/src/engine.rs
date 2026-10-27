@@ -96,6 +96,7 @@ pub struct CaptureEngine {
     encoder: Arc<Mutex<Box<dyn Encoder>>>,
     buffer: Arc<Mutex<ReplayBuffer>>,
     config: Config,
+    framerate: u32,
     running: Arc<Mutex<bool>>,
     audio: Option<AudioPipeline>,
 }
@@ -121,14 +122,28 @@ impl CaptureEngine {
             capture_info.width, capture_info.height
         );
 
+        let resolved = config.resolve(&state, capture_info.width, capture_info.height);
+
+        info!(
+            "ENGINE: resolved output {}x{}@{}fps monitor={}",
+            resolved.width,
+            resolved.height,
+            resolved.framerate,
+            resolved
+                .monitor
+                .as_ref()
+                .map(|monitor| monitor.name.as_str())
+                .unwrap_or("none")
+        );
+
         let encoder = create_encoder(EncoderConfig {
             input_width: capture_info.width,
             input_height: capture_info.height,
 
-            output_width: config.width,
-            output_height: config.height,
+            output_width: resolved.width,
+            output_height: resolved.height,
 
-            framerate: config.framerate,
+            framerate: resolved.framerate,
             bitrate_kbps: config.bitrate_kbps,
         })
         .map_err(|_| EngineError::Encoder)?;
@@ -153,6 +168,7 @@ impl CaptureEngine {
             encoder: Arc::new(Mutex::new(encoder)),
             buffer: Arc::new(Mutex::new(buffer)),
             config,
+            framerate: resolved.framerate,
             running: Arc::new(Mutex::new(false)),
             audio,
         })
@@ -228,7 +244,7 @@ impl CaptureEngine {
             )
             .map_err(|_| EngineError::Capture)?;
 
-        let tick = std::time::Duration::from_micros(1_000_000 / self.config.framerate as u64 / 4);
+        let tick = std::time::Duration::from_micros(1_000_000 / self.framerate as u64 / 4);
         let idle_encoder = Arc::clone(&self.encoder);
         let idle_buffer = Arc::clone(&self.buffer);
         let idle_running = Arc::clone(&self.running);
