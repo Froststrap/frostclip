@@ -2,11 +2,13 @@ use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use config::{AppState, Config};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
-use crate::buffer::ReplayBuffer;
+use crate::audio::{AudioCapture, AudioSource};
+use crate::buffer::{AudioBuffer, ReplayBuffer};
 use crate::capture::Capture;
-use crate::encoder::{Encoder, EncoderConfig, create_encoder};
+use crate::encoder::audio::AudioEncoder;
+use crate::encoder::{AudioInfo, EncodedPacket, Encoder, EncoderConfig, create_encoder};
 use crate::frame::VideoFrame;
 use crate::muxer::MuxerFactory;
 
@@ -43,12 +45,59 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+const AUDIO_SAMPLE_RATE: u32 = 48_000;
+const AUDIO_CHANNELS: u16 = 2;
+
+struct AudioPipeline {
+    capture: AudioCapture,
+    encoder: Arc<Mutex<AudioEncoder>>,
+    buffer: Arc<Mutex<AudioBuffer>>,
+    info: AudioInfo,
+    worker: Option<std::thread::JoinHandle<()>>,
+}
+
+fn create_audio(config: &Config) -> Option<AudioPipeline> {
+    if !config.audio_enabled {
+        info!("ENGINE: audio disabled");
+        return None;
+    }
+
+    let encoder =
+        match AudioEncoder::new(AUDIO_SAMPLE_RATE, AUDIO_CHANNELS, config.audio_bitrate_kbps) {
+            Ok(encoder) => encoder,
+            Err(_) => {
+                warn!("ENGINE: audio encoder init failed, video only");
+                return None;
+            }
+        };
+
+    let capture = match AudioCapture::new(AudioSource::Desktop) {
+        Ok(capture) => capture,
+        Err(err) => {
+            warn!("ENGINE: audio capture init failed: {}, video only", err);
+            return None;
+        }
+    };
+
+    let info = encoder.info();
+    let buffer = AudioBuffer::new(config.replay_buffer_seconds as usize, AUDIO_SAMPLE_RATE);
+
+    Some(AudioPipeline {
+        capture,
+        encoder: Arc::new(Mutex::new(encoder)),
+        buffer: Arc::new(Mutex::new(buffer)),
+        info,
+        worker: None,
+    })
+}
+
 pub struct CaptureEngine {
     capture: Capture,
     encoder: Arc<Mutex<Box<dyn Encoder>>>,
     buffer: Arc<Mutex<ReplayBuffer>>,
     config: Config,
     running: Arc<Mutex<bool>>,
+    audio: Option<AudioPipeline>,
 }
 
 impl CaptureEngine {
@@ -97,12 +146,15 @@ impl CaptureEngine {
             config.replay_buffer_seconds, timebase
         );
 
+        let audio = create_audio(&config);
+
         Ok(Self {
             capture,
             encoder: Arc::new(Mutex::new(encoder)),
             buffer: Arc::new(Mutex::new(buffer)),
             config,
             running: Arc::new(Mutex::new(false)),
+            audio,
         })
     }
 
@@ -205,6 +257,38 @@ impl CaptureEngine {
             }
         });
 
+        if let Some(audio) = self.audio.as_mut() {
+            match audio.capture.start() {
+                Ok(receiver) => {
+                    let encoder = Arc::clone(&audio.encoder);
+                    let buffer = Arc::clone(&audio.buffer);
+
+                    audio.worker = Some(std::thread::spawn(move || {
+                        while let Ok(frame) = receiver.recv() {
+                            let packets = match lock(&encoder).submit(frame) {
+                                Ok(packets) => packets,
+                                Err(_) => {
+                                    error!("ENGINE: audio encoder submit failed");
+                                    continue;
+                                }
+                            };
+
+                            let mut buffer = lock(&buffer);
+
+                            for packet in packets {
+                                buffer.push(packet);
+                            }
+                        }
+                    }));
+
+                    info!("ENGINE: audio capture started");
+                }
+                Err(err) => {
+                    warn!("ENGINE: audio capture start failed: {}, video only", err);
+                }
+            }
+        }
+
         info!("ENGINE: capture started");
 
         Ok(())
@@ -216,7 +300,18 @@ impl CaptureEngine {
         *lock(&self.running) = false;
         self.capture.stop().map_err(|_| EngineError::Capture)?;
 
+        if let Some(audio) = self.audio.as_mut() {
+            if let Err(err) = audio.capture.stop() {
+                warn!("ENGINE: audio stop failed: {}", err);
+            }
+
+            if let Some(worker) = audio.worker.take() {
+                let _ = worker.join();
+            }
+        }
+
         self.drain_encoder()?;
+        self.drain_audio();
 
         info!("ENGINE: capture stopped");
 
@@ -296,11 +391,46 @@ impl CaptureEngine {
             .video_info()
             .ok_or(EngineError::MissingVideoInfo)?;
 
-        let mut muxer = muxer_factory
-            .create(path_str, &video_info)
-            .map_err(|_| EngineError::Muxer)?;
+        let video_num = video_info.time_base_num as i64;
+        let video_den = video_info.time_base_den as i64;
+        let video_start_us = packets[0].pts * 1_000_000 * video_num / video_den;
+
+        let (audio_info, audio_packets) = match &self.audio {
+            Some(audio) => {
+                let audio_packets = lock(&audio.buffer).get_from_us(video_start_us);
+
+                if audio_packets.is_empty() {
+                    (None, audio_packets)
+                } else {
+                    (Some(audio.info.clone()), audio_packets)
+                }
+            }
+            None => (None, Vec::new()),
+        };
+
+        info!(
+            "ENGINE: clip video_packets={} audio_packets={}",
+            packets.len(),
+            audio_packets.len()
+        );
+
+        let mut merged: Vec<(i64, EncodedPacket)> = Vec::new();
 
         for packet in packets {
+            merged.push((packet.dts * 1_000_000 * video_num / video_den, packet));
+        }
+
+        for packet in audio_packets {
+            merged.push((packet.dts * 1_000_000 / AUDIO_SAMPLE_RATE as i64, packet));
+        }
+
+        merged.sort_by_key(|(time_us, _)| *time_us);
+
+        let mut muxer = muxer_factory
+            .create(path_str, &video_info, audio_info.as_ref())
+            .map_err(|_| EngineError::Muxer)?;
+
+        for (_, packet) in merged {
             muxer.write(&packet).map_err(|_| EngineError::Muxer)?;
         }
 
@@ -332,5 +462,25 @@ impl CaptureEngine {
         }
 
         Ok(())
+    }
+
+    fn drain_audio(&self) {
+        let Some(audio) = &self.audio else {
+            return;
+        };
+
+        let packets = match lock(&audio.encoder).flush() {
+            Ok(packets) => packets,
+            Err(_) => {
+                warn!("ENGINE: audio flush failed");
+                return;
+            }
+        };
+
+        let mut buffer = lock(&audio.buffer);
+
+        for packet in packets {
+            buffer.push(packet);
+        }
     }
 }

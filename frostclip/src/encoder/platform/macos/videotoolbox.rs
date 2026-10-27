@@ -265,6 +265,7 @@ unsafe extern "C-unwind" fn output_callback(
     *last = Some(pts);
 
     shared.packets.lock().unwrap().push(EncodedPacket {
+        kind: crate::encoder::packet::PacketKind::Video,
         data,
         pts,
         dts: pts,

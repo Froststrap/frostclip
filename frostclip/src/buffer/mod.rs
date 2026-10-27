@@ -2,6 +2,10 @@ use std::collections::VecDeque;
 
 use crate::encoder::EncodedPacket;
 
+mod audio;
+
+pub use audio::AudioBuffer;
+
 pub struct ReplayBuffer {
     packets: VecDeque<EncodedPacket>,
     max_duration: i64,

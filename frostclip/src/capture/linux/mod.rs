@@ -426,7 +426,7 @@ impl Capture {
                             modifier: state.format.modifier(),
                             fourcc,
                             format,
-                            timestamp: state.started.elapsed().as_micros() as u64,
+                            timestamp: crate::clock::now_us() as u64,
                         });
 
                         drop(buffer);
