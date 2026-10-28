@@ -63,7 +63,7 @@ features = ["derive"]
 
 [workspace.dependencies.tokio]
 version = "1.53.1"
-features = ["rt", "time", "macros", "rt-multi-thread"]
+features = ["rt", "time", "macros", "rt-multi-thread", "signal"]
 
 [workspace.dependencies.wayland-protocols]
 version = "0.32"

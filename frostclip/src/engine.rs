@@ -12,6 +12,11 @@ use crate::encoder::{AudioInfo, EncodedPacket, Encoder, EncoderConfig, create_en
 use crate::frame::VideoFrame;
 use crate::muxer::MuxerFactory;
 
+pub struct SavedClip {
+    pub path: String,
+    pub warning: Option<String>,
+}
+
 #[derive(Debug)]
 pub enum EngineError {
     OutputDir(String),
@@ -21,6 +26,7 @@ pub enum EngineError {
     MissingVideoInfo,
     EmptyBuffer,
     InvalidPath,
+    TooLong(usize),
 }
 
 impl fmt::Display for EngineError {
@@ -33,6 +39,9 @@ impl fmt::Display for EngineError {
             EngineError::MissingVideoInfo => write!(f, "encoder has no video info"),
             EngineError::EmptyBuffer => write!(f, "replay buffer is empty"),
             EngineError::InvalidPath => write!(f, "output path is not valid utf-8"),
+            EngineError::TooLong(max) => {
+                write!(f, "requested clip exceeds replay buffer of {} seconds", max)
+            }
         }
     }
 }
@@ -364,12 +373,18 @@ impl CaptureEngine {
         Ok(())
     }
 
-    pub fn save_clip(&self) -> Result<String, EngineError> {
+    pub fn save_clip(&self) -> Result<SavedClip, EngineError> {
         self.save_clip_with_duration(self.config.default_clip_seconds as usize)
     }
 
-    pub fn save_clip_with_duration(&self, seconds: usize) -> Result<String, EngineError> {
+    pub fn save_clip_with_duration(&self, seconds: usize) -> Result<SavedClip, EngineError> {
         info!("ENGINE: saving clip {} seconds", seconds);
+
+        let max = self.config.replay_buffer_seconds as usize;
+
+        if seconds > max {
+            return Err(EngineError::TooLong(max));
+        }
 
         let buffer = lock(&self.buffer);
 
@@ -378,13 +393,24 @@ impl CaptureEngine {
 
         info!("BUFFER: requested={}s packets={}", seconds, packets.len());
 
+        let mut warning = None;
+
         if let (Some(first), Some(last)) = (packets.first(), packets.last()) {
+            let span = (last.pts - first.pts) as f64 / timebase as f64;
+
             info!(
                 "BUFFER RANGE: first_pts={} last_pts={} duration={}s",
-                first.pts,
-                last.pts,
-                (last.pts - first.pts) as f64 / timebase as f64
+                first.pts, last.pts, span
             );
+
+            if span + 1.0 < seconds as f64 {
+                let message = format!(
+                    "requested {}s but only {:.1}s buffered, saved what exists",
+                    seconds, span
+                );
+                warn!("ENGINE: {}", message);
+                warning = Some(message);
+            }
         }
 
         drop(buffer);
@@ -455,7 +481,10 @@ impl CaptureEngine {
 
         info!("ENGINE: wrote {:?}", path);
 
-        Ok(path.to_string_lossy().to_string())
+        Ok(SavedClip {
+            path: path.to_string_lossy().to_string(),
+            warning,
+        })
     }
 
     fn drain_encoder(&self) -> Result<(), EngineError> {

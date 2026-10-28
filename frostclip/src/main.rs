@@ -6,6 +6,7 @@ pub mod capture;
 pub mod encoder;
 pub mod engine;
 pub mod frame;
+pub mod ipc;
 pub mod monitor;
 pub mod muxer;
 pub mod startup;
@@ -13,13 +14,42 @@ pub mod startup;
 use config::{AppState, Config};
 use engine::CaptureEngine;
 
-use std::fs;
-use std::path::Path;
-
 use tracing::{debug, info, warn};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut args = std::env::args().skip(1);
+
+    if let Some(command) = args.next() {
+        return match command.as_str() {
+            "save" => {
+                let seconds = match args.next() {
+                    Some(value) => Some(
+                        value
+                            .parse::<usize>()
+                            .map_err(|_| format!("invalid seconds: {value}"))?,
+                    ),
+                    None => None,
+                };
+
+                match ipc::request_save(seconds).await {
+                    Ok((path, warning)) => {
+                        if let Some(warning) = warning {
+                            eprintln!("warning: {warning}");
+                        }
+                        println!("{path}");
+                        Ok(())
+                    }
+                    Err(message) => {
+                        eprintln!("error: {message}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+            other => Err(format!("unknown command: {other}").into()),
+        };
+    }
+
     let log_path = config::filesystem::log_directory().join("frostclip.log");
 
     let subscriber = match logging_subscriber::LoggingSubscriber::new().with_file(&log_path) {
@@ -32,12 +62,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     startup::run().map_err(|e| format!("Startup check failed: {}", e))?;
 
     info!("Starting capture pipeline");
-
-    if Path::new("./clips").exists() {
-        debug!("Cleaning up existing clips directory...");
-        fs::remove_dir_all("./clips")?;
-    }
-
     debug!("Initializing capture engine...");
 
     let config = match Config::load() {
@@ -48,8 +72,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             config
         }
     };
-
-    let clip_seconds = config.default_clip_seconds;
 
     let mut state = AppState::load().unwrap_or_default();
 
@@ -80,17 +102,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     engine.start().map_err(|_| "Failed to start engine")?;
 
-    info!("Capturing for {} seconds...", clip_seconds + 3);
+    let listener = ipc::bind()?;
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<ipc::SaveRequest>(8);
+    ipc::serve(listener, tx);
 
-    tokio::time::sleep(std::time::Duration::from_secs(clip_seconds as u64 + 3)).await;
+    let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
 
-    info!("Saving clip {clip_seconds} seconds...");
+    info!("Ready, listening on {:?}", ipc::socket_path());
 
-    let clip_path = engine.save_clip().map_err(|_| "Failed to save clip")?;
+    loop {
+        tokio::select! {
+            Some(request) = rx.recv() => {
+                let result = match request.seconds {
+                    Some(seconds) => engine.save_clip_with_duration(seconds),
+                    None => engine.save_clip(),
+                };
 
-    println!("Clip saved to: {clip_path}");
+                match &result {
+                    Ok(clip) => info!("Clip saved to: {}", clip.path),
+                    Err(_) => warn!("Failed to save clip"),
+                }
+
+                let _ = request.reply.send(
+                    result
+                        .map(|clip| (clip.path, clip.warning))
+                        .map_err(|err| err.to_string()),
+                );
+            }
+            _ = tokio::signal::ctrl_c() => break,
+            _ = sigterm.recv() => break,
+        }
+    }
 
     info!("Stopping capture...");
+
+    ipc::cleanup();
 
     engine.stop().map_err(|_| "Failed to stop engine")?;
 
