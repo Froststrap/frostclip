@@ -380,7 +380,7 @@ impl CaptureEngine {
 
         let filename = format!(
             "clip_{}.{}",
-            chrono::Utc::now().timestamp(),
+            chrono::Local::now().format("%Y-%m-%d_%H-%M-%S"),
             muxer_factory.extension()
         );
 
