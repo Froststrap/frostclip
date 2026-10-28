@@ -372,6 +372,7 @@ dependencies = [
  "dispatch2",
  "ffmpeg-next",
  "ffmpeg-sys-next",
+ "futures-util",
  "libc",
  "logging-subscriber",
  "objc2",

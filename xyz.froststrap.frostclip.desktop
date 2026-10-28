@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=FrostClip
+GenericName=Game Clipper
+Comment=Record replay clips of your desktop
+Exec=frostclip
+Icon=froststrap
+Terminal=false
+Type=Application
+Categories=AudioVideo;Recorder;
+StartupNotify=true
+MimeType=video/mp4;
+DBusActivatable=false
