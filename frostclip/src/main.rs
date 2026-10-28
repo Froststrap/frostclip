@@ -6,7 +6,6 @@ pub mod capture;
 pub mod encoder;
 pub mod engine;
 pub mod frame;
-pub mod hotkey;
 pub mod ipc;
 pub mod monitor;
 pub mod muxer;
@@ -63,14 +62,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     startup::run().map_err(|e| format!("Startup check failed: {}", e))?;
 
-    // match ashpd::AppID::try_from("xyz.froststrap.frostclip") {
-    //     Ok(app_id) => {
-    //         if let Err(err) = ashpd::register_host_app(app_id).await {
-    //             warn!("PORTAL: app id registration failed: {}", err);
-    //         }
-    //     }
-    //     Err(err) => warn!("PORTAL: invalid app id: {}", err),
-    // }
+    match ashpd::AppID::try_from("xyz.froststrap.frostclip") {
+        Ok(app_id) => {
+            if let Err(err) = ashpd::register_host_app(app_id).await {
+                warn!("PORTAL: app id registration failed: {}", err);
+            }
+        }
+        Err(err) => warn!("PORTAL: invalid app id: {}", err),
+    }
 
     info!("Starting capture pipeline");
     debug!("Initializing capture engine...");
@@ -116,8 +115,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let listener = ipc::bind()?;
     let (tx, mut rx) = tokio::sync::mpsc::channel::<ipc::SaveRequest>(8);
     ipc::serve(listener, tx.clone());
-    // TODO: fix this bullshit GlobalShortcuts portal thing.
-    // hotkey::spawn(tx);
 
     let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
 
