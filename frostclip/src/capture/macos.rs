@@ -120,7 +120,7 @@ pub struct Capture {
 }
 
 impl Capture {
-    pub async fn new(_token: Option<&str>, _state: &mut config::AppState) -> Result<Self, ()> {
+    pub async fn new(_state: &mut config::AppState, _target: Option<&str>) -> Result<Self, ()> {
         use objc2_core_graphics::{CGPreflightScreenCaptureAccess, CGRequestScreenCaptureAccess};
 
         if !CGPreflightScreenCaptureAccess() {

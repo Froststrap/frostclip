@@ -3,6 +3,8 @@ use crate::capture::{CaptureBackend, CaptureInfo};
 use crate::frame::{DmaBufFrame, VideoFormat, VideoFrame};
 use portal::screencast::PortalStream;
 
+use ashpd::desktop::screencast::Stream;
+use config::state::MonitorState;
 use pipewire as pw;
 use pw::spa::param::format::{FormatProperties, MediaSubtype, MediaType};
 use pw::spa::param::format_utils;
@@ -33,20 +35,93 @@ pub struct Capture {
     info: CaptureInfo,
 }
 
-impl Capture {
-    pub async fn new(
-        restore_token: Option<&str>,
-        state: &mut config::AppState,
-    ) -> Result<Self, ()> {
-        let portal = portal::screencast::create(restore_token)
-            .await
-            .map_err(|err| {
-                error!("PORTAL creation failed: {}", err);
-            })?;
+fn stream_matches(stream: &Stream, name: &str, monitor: Option<&MonitorState>) -> bool {
+    if stream.mapping_id() == Some(name) {
+        return true;
+    }
 
-        let restore_token = portal.restore_token.clone();
-        if let Some(token) = &restore_token {
-            state.set_session_token(token.clone());
+    let Some(monitor) = monitor else {
+        return true;
+    };
+
+    let position_ok = stream
+        .position()
+        .map(|position| position == (monitor.x, monitor.y))
+        .unwrap_or(true);
+
+    let scale = monitor.scale.max(0.01);
+    let logical = (
+        (monitor.width as f64 / scale).round() as i32,
+        (monitor.height as f64 / scale).round() as i32,
+    );
+
+    let size_ok = stream
+        .size()
+        .map(|size| size == (monitor.width as i32, monitor.height as i32) || size == logical)
+        .unwrap_or(true);
+
+    position_ok && size_ok
+}
+
+impl Capture {
+    async fn open_portal(token: Option<&str>) -> Result<PortalStream, ()> {
+        portal::screencast::create(token).await.map_err(|err| {
+            error!("PORTAL creation failed: {}", err);
+        })
+    }
+
+    pub async fn new(state: &mut config::AppState, target: Option<&str>) -> Result<Self, ()> {
+        let monitor = target.and_then(|name| state.monitor(name).cloned());
+
+        let token = match target {
+            Some(name) => state
+                .monitor_token(name)
+                .or_else(|| state.session_token())
+                .map(str::to_owned),
+            None => state.session_token().map(str::to_owned),
+        };
+
+        let mut portal = Self::open_portal(token.as_deref()).await?;
+
+        if let Some(name) = target {
+            let matched = portal
+                .streams
+                .first()
+                .is_some_and(|stream| stream_matches(stream, name, monitor.as_ref()));
+
+            if !matched {
+                warn!(
+                    "CAPTURE: portal stream does not match monitor {}, asking again",
+                    name
+                );
+
+                state.clear_monitor_token(name);
+                let _ = portal.session.close().await;
+
+                portal = Self::open_portal(None).await?;
+
+                let matched = portal
+                    .streams
+                    .first()
+                    .is_some_and(|stream| stream_matches(stream, name, monitor.as_ref()));
+
+                if !matched {
+                    error!("CAPTURE: selected source is not monitor {}", name);
+                    let _ = portal.session.close().await;
+                    return Err(());
+                }
+            }
+        }
+
+        if let Some(token) = portal.restore_token.clone() {
+            let stored = match target {
+                Some(name) => state.set_monitor_token(name, token.clone()),
+                None => false,
+            };
+
+            if !stored {
+                state.set_session_token(token);
+            }
 
             if let Err(err) = state.save() {
                 error!("STATE: failed to save restore token: {}", err);

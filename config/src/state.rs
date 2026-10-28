@@ -78,4 +78,36 @@ impl AppState {
             })
             .collect();
     }
+
+    pub fn monitor(&self, name: &str) -> Option<&MonitorState> {
+        self.monitors.iter().find(|monitor| monitor.name == name)
+    }
+
+    pub fn monitor_token(&self, name: &str) -> Option<&str> {
+        self.monitor(name)?.restore_token.as_deref()
+    }
+
+    pub fn set_monitor_token(&mut self, name: &str, token: String) -> bool {
+        match self
+            .monitors
+            .iter_mut()
+            .find(|monitor| monitor.name == name)
+        {
+            Some(monitor) => {
+                monitor.restore_token = Some(token);
+                true
+            }
+            None => false,
+        }
+    }
+
+    pub fn clear_monitor_token(&mut self, name: &str) {
+        if let Some(monitor) = self
+            .monitors
+            .iter_mut()
+            .find(|monitor| monitor.name == name)
+        {
+            monitor.restore_token = None;
+        }
+    }
 }

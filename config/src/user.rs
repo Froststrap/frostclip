@@ -59,6 +59,18 @@ impl Config {
         std::fs::create_dir_all(&self.output_dir)
     }
 
+    pub fn target_monitor(&self, state: &AppState) -> Option<String> {
+        if self.monitor.eq_ignore_ascii_case("auto") {
+            return None;
+        }
+
+        state
+            .monitors
+            .iter()
+            .find(|monitor| monitor.name == self.monitor)
+            .map(|monitor| monitor.name.clone())
+    }
+
     pub fn resolve(&self, state: &AppState, capture_width: u32, capture_height: u32) -> Resolved {
         let monitor = self.pick_monitor(state, capture_width, capture_height);
 

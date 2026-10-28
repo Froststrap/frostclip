@@ -46,9 +46,14 @@ pub async fn create(saved_restore_token: Option<&str>) -> ashpd::Result<PortalSt
     } else {
         for (i, stream) in streams.iter().enumerate() {
             debug!(
-                "PORTAL: stream[{}] node_id={}",
+                "PORTAL: stream[{}] node_id={} id={:?} position={:?} size={:?} source={:?} mapping_id={:?}",
                 i,
-                stream.pipe_wire_node_id()
+                stream.pipe_wire_node_id(),
+                stream.id(),
+                stream.position(),
+                stream.size(),
+                stream.source_type(),
+                stream.mapping_id()
             );
         }
     }

@@ -31,11 +31,9 @@ pub struct Capture {
 }
 
 impl Capture {
-    pub async fn new(state: &mut config::AppState) -> Result<Self, ()> {
-        let token = state.session_token().map(str::to_owned);
-
+    pub async fn new(state: &mut config::AppState, target: Option<&str>) -> Result<Self, ()> {
         Ok(Self {
-            backend: Box::new(platform::Capture::new(token.as_deref(), state).await?),
+            backend: Box::new(platform::Capture::new(state, target).await?),
         })
     }
 

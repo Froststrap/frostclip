@@ -111,7 +111,8 @@ impl CaptureEngine {
 
         info!("ENGINE: output directory {:?}", config.output_dir);
 
-        let capture = Capture::new(&mut state)
+        let target = config.target_monitor(&state);
+        let capture = Capture::new(&mut state, target.as_deref())
             .await
             .map_err(|_| EngineError::Capture)?;
         let capture_info = capture.info();
