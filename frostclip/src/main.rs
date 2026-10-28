@@ -9,6 +9,7 @@ pub mod frame;
 pub mod ipc;
 pub mod monitor;
 pub mod muxer;
+pub mod notify;
 pub mod startup;
 
 use config::{AppState, Config};
@@ -60,16 +61,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tracing::subscriber::set_global_default(subscriber)?;
 
-    startup::run().map_err(|e| format!("Startup check failed: {}", e))?;
+    std::panic::set_hook(Box::new(|info| {
+        tracing::error!("PANIC: {}", info);
+    }));
 
-    match ashpd::AppID::try_from("xyz.froststrap.frostclip") {
-        Ok(app_id) => {
-            if let Err(err) = ashpd::register_host_app(app_id).await {
-                warn!("PORTAL: app id registration failed: {}", err);
-            }
-        }
-        Err(err) => warn!("PORTAL: invalid app id: {}", err),
-    }
+    startup::run().map_err(|e| format!("Startup check failed: {}", e))?;
 
     info!("Starting capture pipeline");
     debug!("Initializing capture engine...");
@@ -112,6 +108,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     engine.start().map_err(|_| "Failed to start engine")?;
 
+    notify::init();
+
     let listener = ipc::bind()?;
     let (tx, mut rx) = tokio::sync::mpsc::channel::<ipc::SaveRequest>(8);
     ipc::serve(listener, tx.clone());
@@ -129,8 +127,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 };
 
                 match &result {
-                    Ok(clip) => info!("Clip saved to: {}", clip.path),
-                    Err(_) => warn!("Failed to save clip"),
+                    Ok(clip) => {
+                        info!("Clip saved to: {}", clip.path);
+                        let name = std::path::Path::new(&clip.path)
+                            .file_name()
+                            .map(|name| name.to_string_lossy().to_string())
+                            .unwrap_or_default();
+                        notify::send(
+                            &format!("{} second clip saved", clip.seconds),
+                            &name,
+                            Some(&clip.path),
+                        );
+                    }
+                    Err(err) => {
+                        warn!("Failed to save clip: {}", err);
+                        notify::send("Clip failed", &err.to_string(), None);
+                    }
                 }
 
                 let _ = request.reply.send(

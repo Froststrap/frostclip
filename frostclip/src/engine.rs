@@ -14,6 +14,7 @@ use crate::muxer::MuxerFactory;
 
 pub struct SavedClip {
     pub path: String,
+    pub seconds: usize,
     pub warning: Option<String>,
 }
 
@@ -483,6 +484,7 @@ impl CaptureEngine {
 
         Ok(SavedClip {
             path: path.to_string_lossy().to_string(),
+            seconds,
             warning,
         })
     }
