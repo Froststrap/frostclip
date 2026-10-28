@@ -1,48 +1,26 @@
-use std::path::PathBuf;
 use std::time::Duration;
 
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::{UnixListener, UnixStream};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, warn};
+
+#[cfg(unix)]
+mod unix;
+#[cfg(unix)]
+use unix as platform;
+
+pub use platform::{Listener, bind, cleanup, socket_path};
 
 pub struct SaveRequest {
     pub seconds: Option<usize>,
     pub reply: oneshot::Sender<Result<(String, Option<String>), String>>,
 }
 
-pub fn socket_path() -> PathBuf {
-    std::env::var_os("XDG_RUNTIME_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir)
-        .join("frostclip.sock")
-}
-
-pub fn bind() -> std::io::Result<UnixListener> {
-    let path = socket_path();
-
-    if path.exists() {
-        if std::os::unix::net::UnixStream::connect(&path).is_ok() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::AddrInUse,
-                "another frostclip instance is running",
-            ));
-        }
-        std::fs::remove_file(&path)?;
-    }
-
-    UnixListener::bind(path)
-}
-
-pub fn cleanup() {
-    let _ = std::fs::remove_file(socket_path());
-}
-
-pub fn serve(listener: UnixListener, tx: mpsc::Sender<SaveRequest>) {
+pub fn serve(listener: Listener, tx: mpsc::Sender<SaveRequest>) {
     tokio::spawn(async move {
         loop {
             let stream = match listener.accept().await {
-                Ok((stream, _)) => stream,
+                Ok(stream) => stream,
                 Err(err) => {
                     warn!("IPC: accept failed: {}", err);
                     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -60,8 +38,11 @@ pub fn serve(listener: UnixListener, tx: mpsc::Sender<SaveRequest>) {
     });
 }
 
-async fn handle(stream: UnixStream, tx: mpsc::Sender<SaveRequest>) -> std::io::Result<()> {
-    let (read, mut write) = stream.into_split();
+async fn handle<S>(stream: S, tx: mpsc::Sender<SaveRequest>) -> std::io::Result<()>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let (read, mut write) = tokio::io::split(stream);
     let mut lines = BufReader::new(read).lines();
 
     let Some(line) = lines.next_line().await? else {
@@ -106,7 +87,7 @@ async fn handle(stream: UnixStream, tx: mpsc::Sender<SaveRequest>) -> std::io::R
 }
 
 pub async fn request_save(seconds: Option<usize>) -> Result<(String, Option<String>), String> {
-    let mut stream = UnixStream::connect(socket_path())
+    let mut stream = platform::connect()
         .await
         .map_err(|err| format!("cannot reach daemon: {err}"))?;
 
