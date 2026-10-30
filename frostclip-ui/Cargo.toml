@@ -1,0 +1,11 @@
+[package]
+name = "frostclip-ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+iced = { workspace = true }
+iced_layershell = { version = "0.17", default-features = false }
+iced_fonts = { version = "0.3.0", features = ["lucide"] }

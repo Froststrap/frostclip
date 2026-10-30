@@ -2,7 +2,8 @@
 resolver = "3"
 members = [
   "config",
-  "frostclip"
+  "frostclip",
+  "frostclip-ui"
 ]
 default-members = ["frostclip"]
 
@@ -75,3 +76,8 @@ features = ["rt", "time", "macros", "rt-multi-thread", "signal"]
 [workspace.dependencies.wayland-protocols]
 version = "0.32"
 features = ["client", "unstable"]
+
+[workspace.dependencies.iced]
+version = "0.14"
+default-features = false
+features = ["wgpu", "wayland", "thread-pool"]

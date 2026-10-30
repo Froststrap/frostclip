@@ -80,6 +80,8 @@ craneLib.devShell ({
   ] ++ lib.optionals stdenv.isLinux [
     glib
     pipewire
+    libxkbcommon
+    wayland
     llvmPackages.libclang
   ];
 }
