@@ -6,6 +6,7 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
+config.workspace = true
 iced = { workspace = true }
 iced_layershell = { version = "0.17", default-features = false }
 iced_fonts = { version = "0.3.0", features = ["lucide"] }

@@ -976,6 +976,7 @@ dependencies = [
 name = "frostclip-ui"
 version = "0.0.1"
 dependencies = [
+ "config",
  "iced",
  "iced_fonts",
  "iced_layershell",

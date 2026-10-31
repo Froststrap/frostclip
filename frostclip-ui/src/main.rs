@@ -1,19 +1,21 @@
+mod draft;
 mod home;
 mod settings;
 mod theme;
 mod widgets;
 
 use iced::alignment::Horizontal;
-use iced::keyboard::{self, key::Named, Key};
+use iced::keyboard::{self, Key, key::Named};
 use iced::widget::{button, column, container, row, text};
-use iced::{event, Alignment, Element, Event, Length, Subscription, Task, Theme};
+use iced::{Alignment, Element, Event, Length, Subscription, Task, Theme, event};
 use iced_fonts::LUCIDE_FONT_BYTES;
 use iced_layershell::application;
 use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer};
 use iced_layershell::settings::{LayerShellSettings, Settings, StartMode};
 use iced_layershell::to_layer_message;
 
-use widgets::{icon, lucide, BOLD};
+use draft::Draft;
+use widgets::{BOLD, icon, lucide};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Page {
@@ -33,15 +35,18 @@ struct App {
     selected: Tile,
     advanced: bool,
     notice: String,
+    draft: Draft,
 }
 
-impl Default for App {
-    fn default() -> Self {
+impl App {
+    fn new() -> Self {
+        let (draft, notice) = Draft::load();
         Self {
             page: Page::Home,
             selected: Tile::Replay,
             advanced: false,
-            notice: String::new(),
+            notice: notice.unwrap_or_default(),
+            draft,
         }
     }
 }
@@ -56,11 +61,14 @@ pub enum Message {
     SaveClip,
     NotReady(&'static str),
     SetAdvanced(bool),
+    Edit(draft::Key, String),
+    ToggleAudio(bool),
+    Apply,
     Event(Event),
 }
 
 fn main() -> Result<(), iced_layershell::Error> {
-    application(App::default, namespace, update, view)
+    application(App::new, namespace, update, view)
         .style(style)
         .subscription(subscription)
         .settings(Settings {
@@ -124,6 +132,24 @@ fn update(app: &mut App, message: Message) -> Task<Message> {
             app.advanced = value;
             Task::none()
         }
+        Message::Edit(key, value) => {
+            app.draft.set(key, value);
+            Task::none()
+        }
+        Message::ToggleAudio(value) => {
+            app.draft.set_audio_enabled(value);
+            Task::none()
+        }
+        Message::Apply => {
+            app.notice = match app.draft.apply() {
+                Ok(config) => match config.save() {
+                    Ok(()) => String::from("Saved. Restart daemon to apply"),
+                    Err(error) => format!("Save failed: {error}"),
+                },
+                Err(error) => error,
+            };
+            Task::none()
+        }
         Message::Event(Event::Keyboard(keyboard::Event::KeyPressed {
             key: Key::Named(Named::Escape),
             ..
@@ -142,7 +168,7 @@ fn update(app: &mut App, message: Message) -> Task<Message> {
 fn view(app: &App) -> Element<'_, Message> {
     let body = match app.page {
         Page::Home => home::view(app.selected),
-        Page::Settings => settings::view(app.advanced),
+        Page::Settings => settings::view(&app.draft, app.advanced),
     };
 
     let top = container(
@@ -172,8 +198,9 @@ fn view(app: &App) -> Element<'_, Message> {
         .width(Length::Fill)
         .style(|_| theme::status_bar());
 
-    column![top, container(body).center(Length::Fill), bottom,]
+    column![top, container(body).center(Length::Fill), bottom]
         .width(Length::Fill)
         .height(Length::Fill)
         .into()
 }
+
